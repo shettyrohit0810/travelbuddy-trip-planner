@@ -51,7 +51,51 @@ const UI_TRANSLATIONS: Record<string, Record<string, string>> = {
     ttsPlay: 'Speak Phrase',
     translateOnDemand: 'Translate On Demand',
     ocrOverlay: 'Menu & Sign OCR Translation',
-    voiceHelper: 'Voice Translator Speech-to-Speech'
+    voiceHelper: 'Voice Translator Speech-to-Speech',
+    heroTitle: 'Your Perfect Trip, Planned in Seconds',
+    heroPlaceholder: 'e.g. 4-day Goa trip for 2 people with ₹25,000 budget, beaches...',
+    generatePlan: 'Generate Plan',
+    popularEscapes: 'Popular Escapes',
+    popularEscapesSub: 'Curated itineraries from our most-loved destinations around the globe.',
+    exploreAll: 'Explore All',
+    modernTravelerTitle: 'Built for the Modern Traveler',
+    modernTravelerSub: 'We leverage advanced AI to take the friction out of travel planning, so you can focus on the memories.',
+    ctaTitle: 'Ready to see the world?',
+    ctaSub: 'Join thousands of travelers who are planning smarter, better, and faster with VoyageEase AI.',
+    getStarted: 'Get Started for Free',
+    login: 'Login',
+    signUp: 'Sign Up',
+    explore: 'Explore',
+    popularEscapesCard1: 'Kyoto, Japan',
+    popularEscapesCard2: 'Amalfi Coast, Italy',
+    popularEscapesCard3: 'Santorini, Greece',
+    popularEscapesItineraries: 'Itineraries',
+    popularEscapesView: 'View Itineraries',
+    featureItineraryTitle: 'AI Itineraries',
+    featureItinerarySub: 'Get a personalized minute-by-minute plan based on your interests, pace, and local hidden gems.',
+    featureBudgetTitle: 'Smart Budgeting',
+    featureBudgetSub: 'Real-time cost estimations and currency tracking to keep your wanderlust within your wallet\'s reach.',
+    featureAlertTitle: 'Real-time Alerts',
+    featureAlertSub: 'Stay ahead with instant updates on flight delays, gate changes, and local weather shifts.',
+    socialTitle: '4.9/5 stars on App Store',
+    socialSub: 'Trusted by over 500,000 travelers worldwide',
+    testimonial1Text: '"I used to spend weeks planning our family vacations. VoyageEase did it in less than a minute, and the suggestions were places I never would have found on my own!"',
+    testimonial1Author: 'Sarah Jenkins',
+    testimonial1Role: 'Frequent Traveler',
+    testimonial2Text: '"The budget tracking is a lifesaver. Being able to see our spending in real-time while navigating the Tokyo subway made our trip so much less stressful."',
+    testimonial2Author: 'Mark Thompson',
+    testimonial2Role: 'Backpacker & Tech Enthusiast',
+    footerCompany: 'Company',
+    footerAboutUs: 'About Us',
+    footerCareers: 'Careers',
+    footerContact: 'Contact',
+    footerProduct: 'Product',
+    footerHelpCenter: 'Help Center',
+    footerLegal: 'Legal',
+    footerPrivacyPolicy: 'Privacy Policy',
+    footerTermsOfService: 'Terms of Service',
+    footerCopyright: '© 2026 VoyageEase. All rights reserved. Your journey begins here.',
+    footerDesc: 'Your journey begins here. We help you explore the world with the power of artificial intelligence.'
   },
   hi: {
     home: 'होम',
@@ -188,7 +232,19 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     const saved = localStorage.getItem('user_language');
     if (saved) {
       const matched = SUPPORTED_LANGUAGES.find(l => l.code === saved);
-      if (matched) setCurrentLanguage(matched);
+      if (matched) {
+        setCurrentLanguage(matched);
+        return;
+      }
+    }
+
+    // Auto detect browser default language if no preference saved
+    if (typeof navigator !== 'undefined') {
+      const browserLang = navigator.language.split('-')[0].toLowerCase();
+      const matched = SUPPORTED_LANGUAGES.find(l => l.code === browserLang);
+      if (matched) {
+        setCurrentLanguage(matched);
+      }
     }
   }, []);
 

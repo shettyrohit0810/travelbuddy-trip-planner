@@ -30,7 +30,7 @@ export default function ItineraryPage({ params }: { params: Promise<{ id: string
     <div className="bg-surface text-on-surface font-body-md antialiased pt-16 min-h-screen flex flex-col">
       {/* TopNavBar */}
       <nav className="fixed top-0 w-full z-50 bg-surface/85 backdrop-blur-xl shadow-sm transition-all duration-300 ease-in-out">
-        <div className="max-w-container-max mx-auto px-margin-desktop md:px-margin-mobile flex justify-between items-center h-16">
+        <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop flex justify-between items-center h-16">
           <Link href="/" className="font-headline-md text-headline-md font-bold text-primary">AeroGuide</Link>
           <div className="hidden md:flex gap-gutter items-center">
             <Link href="/discover" className="text-on-surface-variant hover:text-primary transition-colors hover:opacity-80">Discover</Link>
@@ -209,7 +209,7 @@ export default function ItineraryPage({ params }: { params: Promise<{ id: string
 
       {/* Footer */}
       <footer className="w-full py-12 bg-surface-container mt-20">
-        <div className="max-w-container-max mx-auto px-margin-desktop grid grid-cols-1 md:grid-cols-4 gap-gutter">
+        <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop grid grid-cols-1 md:grid-cols-4 gap-gutter">
           <div>
             <div className="font-headline-sm text-headline-sm font-bold text-on-surface mb-4">AeroGuide</div>
             <p className="font-body-sm text-body-sm text-on-surface-variant">© 2026 AeroGuide AI. Your intuitive travel companion.</p>

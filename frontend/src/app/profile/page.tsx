@@ -11,7 +11,7 @@ export default function ProfilePage() {
     <div className="bg-background text-on-background antialiased font-body-md min-h-screen flex flex-col pt-16">
       {/* TopNavBar */}
       <nav className="fixed top-0 w-full z-50 bg-surface/85 backdrop-blur-xl shadow-sm transition-all duration-300 ease-in-out">
-        <div className="max-w-container-max mx-auto px-margin-desktop md:px-margin-mobile flex justify-between items-center h-16">
+        <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop flex justify-between items-center h-16">
           <Link href="/" className="font-headline-md text-headline-md font-bold text-primary hover:opacity-80 transition-opacity">
             AeroGuide
           </Link>
@@ -243,7 +243,7 @@ export default function ProfilePage() {
 
       {/* Footer */}
       <footer className="w-full py-12 bg-surface-container mt-20">
-        <div className="max-w-container-max mx-auto px-margin-desktop grid grid-cols-1 md:grid-cols-4 gap-gutter">
+        <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop grid grid-cols-1 md:grid-cols-4 gap-gutter">
           <div className="md:col-span-1">
             <div className="font-headline-sm text-headline-sm font-bold text-on-surface mb-4">
               AeroGuide
