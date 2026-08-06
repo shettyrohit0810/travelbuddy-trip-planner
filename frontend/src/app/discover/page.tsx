@@ -14,7 +14,7 @@ export default function DiscoverPage() {
         <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop flex justify-between items-center h-16">
           <Link href="/" className="font-headline-md text-headline-md font-bold text-primary flex items-center gap-2">
             <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>flight_takeoff</span>
-            AeroGuide
+            TravelBuddy
           </Link>
           
           <div className="hidden md:flex items-center gap-8">
@@ -226,9 +226,9 @@ export default function DiscoverPage() {
           <div className="col-span-1">
             <div className="font-headline-sm text-headline-sm font-bold text-on-surface flex items-center gap-2 mb-4">
               <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>flight_takeoff</span>
-              AeroGuide
+              TravelBuddy
             </div>
-            <p className="font-body-sm text-body-sm text-on-surface-variant">© 2026 AeroGuide AI. Your intuitive travel companion.</p>
+            <p className="font-body-sm text-body-sm text-on-surface-variant">© 2026 TravelBuddy AI. Your intuitive travel companion.</p>
           </div>
           <div className="col-span-1 flex flex-col gap-2">
             <Link className="font-body-sm text-body-sm text-on-surface-variant hover:text-primary transition-colors duration-200" href="#">About Us</Link>

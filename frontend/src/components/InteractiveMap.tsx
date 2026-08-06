@@ -29,7 +29,7 @@ export default function InteractiveMap({ destination }: InteractiveMapProps) {
           `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(destination)}&limit=1`,
           {
             headers: {
-              'User-Agent': 'AeroGuide-Travel-Planner'
+              'User-Agent': 'TravelBuddy-Travel-Planner'
             }
           }
         );

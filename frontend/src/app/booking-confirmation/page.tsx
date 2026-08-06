@@ -12,7 +12,7 @@ export default function BookingConfirmationPage() {
       {/* TopNavBar */}
       <nav className="fixed top-0 w-full z-50 bg-surface/85 backdrop-blur-xl shadow-sm transition-all duration-300 ease-in-out">
         <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop flex justify-between items-center h-16">
-          <Link href="/" className="font-headline-md text-headline-md font-bold text-primary">AeroGuide</Link>
+          <Link href="/" className="font-headline-md text-headline-md font-bold text-primary">TravelBuddy</Link>
           <div className="hidden md:flex gap-gutter items-center">
             <Link href="/discover" className="text-on-surface-variant hover:text-primary transition-colors hover:opacity-80">Discover</Link>
             <Link href="/dashboard" className="text-on-surface-variant hover:text-primary transition-colors hover:opacity-80">My Trips</Link>

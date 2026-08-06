@@ -241,7 +241,7 @@ export default function LanguageSelector({ embeddedOnly = false }: LanguageSelec
 
           {/* Fixed Footer */}
           <div className="p-2.5 bg-surface-container-low border-t border-surface-variant/20 text-center text-[10px] text-on-surface-variant font-bold shrink-0">
-            AeroGuide translates transcripts & guides instantly.
+            TravelBuddy translates transcripts & guides instantly.
           </div>
         </div>
       )}

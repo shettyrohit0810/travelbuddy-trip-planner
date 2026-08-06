@@ -234,7 +234,7 @@ function PlanTripContent() {
           <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop flex justify-between items-center">
             <Link href="/" className="font-headline-md text-headline-md font-bold text-primary flex items-center gap-2">
               <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>flight_takeoff</span>
-              AeroGuide
+              TravelBuddy
             </Link>
             <div className="flex items-center gap-4">
               <ThemeToggle />
@@ -303,7 +303,7 @@ function PlanTripContent() {
               <div className="flex justify-between items-center mb-6">
                 <div>
                   <h1 className="font-display-lg text-on-surface mb-1">Your Custom Itinerary</h1>
-                  <p className="text-on-surface-variant font-body-md text-body-md">Generated instantly by AeroGuide multi-agent planning network.</p>
+                  <p className="text-on-surface-variant font-body-md text-body-md">Generated instantly by TravelBuddy multi-agent planning network.</p>
                 </div>
                 <button 
                   onClick={() => {
@@ -364,7 +364,7 @@ function PlanTripContent() {
         <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop flex justify-between items-center">
           <Link href="/" className="font-headline-md text-headline-md font-bold text-primary flex items-center gap-2">
             <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>flight_takeoff</span>
-            AeroGuide
+            TravelBuddy
           </Link>
           <div className="flex items-center gap-4">
             <ThemeToggle />

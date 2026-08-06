@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, field_validator
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "Multi-Agent Trip Planner API"
+    PROJECT_NAME: str = "TravelBuddy API"
     API_V1_STR: str = "/api/v1"
     
     # CORS

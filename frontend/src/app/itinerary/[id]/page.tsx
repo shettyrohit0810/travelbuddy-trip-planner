@@ -31,7 +31,7 @@ export default function ItineraryPage({ params }: { params: Promise<{ id: string
       {/* TopNavBar */}
       <nav className="fixed top-0 w-full z-50 bg-surface/85 backdrop-blur-xl shadow-sm transition-all duration-300 ease-in-out">
         <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop flex justify-between items-center h-16">
-          <Link href="/" className="font-headline-md text-headline-md font-bold text-primary">AeroGuide</Link>
+          <Link href="/" className="font-headline-md text-headline-md font-bold text-primary">TravelBuddy</Link>
           <div className="hidden md:flex gap-gutter items-center">
             <Link href="/discover" className="text-on-surface-variant hover:text-primary transition-colors hover:opacity-80">Discover</Link>
             <Link href="/dashboard" className="text-primary border-b-2 border-primary font-bold pb-1">My Trips</Link>
@@ -211,8 +211,8 @@ export default function ItineraryPage({ params }: { params: Promise<{ id: string
       <footer className="w-full py-12 bg-surface-container mt-20">
         <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop grid grid-cols-1 md:grid-cols-4 gap-gutter">
           <div>
-            <div className="font-headline-sm text-headline-sm font-bold text-on-surface mb-4">AeroGuide</div>
-            <p className="font-body-sm text-body-sm text-on-surface-variant">© 2026 AeroGuide AI. Your intuitive travel companion.</p>
+            <div className="font-headline-sm text-headline-sm font-bold text-on-surface mb-4">TravelBuddy</div>
+            <p className="font-body-sm text-body-sm text-on-surface-variant">© 2026 TravelBuddy AI. Your intuitive travel companion.</p>
           </div>
           <div className="col-span-1 md:col-span-3 flex flex-wrap gap-6 justify-end items-center text-body-sm font-body-sm text-on-surface-variant">
             <Link className="hover:text-primary transition-colors duration-200" href="#">About Us</Link>
@@ -248,11 +248,11 @@ export default function ItineraryPage({ params }: { params: Promise<{ id: string
                     className="flex-1 bg-surface-container-low border border-surface-variant/50 rounded-lg px-3 py-2 font-body-sm text-body-sm text-on-surface outline-none" 
                     readOnly 
                     type="text" 
-                    value={`aeroguide.ai/t/${rawDest}-2026`}
+                    value={`travelbuddy.ai/t/${rawDest}-2026`}
                   />
-                  <button 
+                  <button
                     onClick={() => {
-                      navigator.clipboard.writeText(`aeroguide.ai/t/${rawDest}-2026`);
+                      navigator.clipboard.writeText(`travelbuddy.ai/t/${rawDest}-2026`);
                       alert("Link copied to clipboard!");
                     }}
                     className="bg-primary text-on-primary px-4 py-2 rounded-lg font-label-md text-label-md hover:opacity-80 transition-opacity cursor-pointer"

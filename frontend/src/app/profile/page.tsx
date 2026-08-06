@@ -13,7 +13,7 @@ export default function ProfilePage() {
       <nav className="fixed top-0 w-full z-50 bg-surface/85 backdrop-blur-xl shadow-sm transition-all duration-300 ease-in-out">
         <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop flex justify-between items-center h-16">
           <Link href="/" className="font-headline-md text-headline-md font-bold text-primary hover:opacity-80 transition-opacity">
-            AeroGuide
+            TravelBuddy
           </Link>
           <div className="hidden md:flex space-x-8">
             <Link href="/discover" className="font-body-md text-body-md text-on-surface-variant hover:text-primary transition-colors hover:opacity-80">Discover</Link>
@@ -211,7 +211,7 @@ export default function ProfilePage() {
                 <span className="material-symbols-outlined ai-sparkle">auto_awesome</span>
                 AI Preferences
               </h3>
-              <p className="font-body-sm text-body-sm text-on-surface-variant mb-6 relative z-10">Tailor how AeroGuide plans for you.</p>
+              <p className="font-body-sm text-body-sm text-on-surface-variant mb-6 relative z-10">Tailor how TravelBuddy plans for you.</p>
               <div className="space-y-4 relative z-10">
                 <label className="flex items-center justify-between cursor-pointer p-3 bg-surface rounded-lg border border-surface-variant hover:border-primary/30 transition-colors">
                   <div>
@@ -246,10 +246,10 @@ export default function ProfilePage() {
         <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop grid grid-cols-1 md:grid-cols-4 gap-gutter">
           <div className="md:col-span-1">
             <div className="font-headline-sm text-headline-sm font-bold text-on-surface mb-4">
-              AeroGuide
+              TravelBuddy
             </div>
             <p className="font-body-sm text-body-sm text-on-surface-variant">
-              © 2026 AeroGuide AI. Your intuitive travel companion.
+              © 2026 TravelBuddy AI. Your intuitive travel companion.
             </p>
           </div>
           <div className="md:col-span-3 flex flex-wrap gap-x-8 gap-y-4 md:justify-end">

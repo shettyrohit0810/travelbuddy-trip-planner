@@ -33,7 +33,7 @@ def render_email_template(
     </head>
     <body>
         <div class="card">
-            <div class="brand">AeroGuide AI</div>
+            <div class="brand">TravelBuddy AI</div>
             <div class="header">Your personalized itinerary is ready!</div>
             <p>We have successfully compiled your travel document for <span class="highlight">{title}</span>.</p>
             <p><em>"{summary}"</em></p>
@@ -47,7 +47,7 @@ def render_email_template(
             <p>Your PDF trip report, day-wise schedule, and packing checklists are attached to this email.</p>
             
             <div class="footer">
-                © 2026 AeroGuide AI Travel Orchestrator. Confidential travel document.
+                © 2026 TravelBuddy AI Travel Orchestrator. Confidential travel document.
             </div>
         </div>
     </body>

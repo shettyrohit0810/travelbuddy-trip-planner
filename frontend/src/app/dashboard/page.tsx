@@ -105,7 +105,7 @@ function DashboardContent() {
           <div className="flex items-center space-x-3">
             <span className="font-bold text-[22px] text-primary tracking-tight font-heading flex items-center gap-1.5">
               <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>flight_takeoff</span>
-              AeroGuide
+              TravelBuddy
             </span>
           </div>
 

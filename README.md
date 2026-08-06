@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="https://img.shields.io/badge/AeroGuide-AI%20Trip%20Planner-0058bc?style=for-the-badge&logo=airplane&logoColor=white" />
+<img src="https://img.shields.io/badge/TravelBuddy-AI%20Trip%20Planner-0058bc?style=for-the-badge&logo=airplane&logoColor=white" />
 
-# ✈️ AeroGuide — AI Multi-Agent Travel Planner
+# ✈️ TravelBuddy — AI Multi-Agent Travel Planner
 
 ### *Plan smarter. Travel better. Powered by 16 specialized AI agents across a dual-graph pipeline.*
 
@@ -20,19 +20,19 @@
 
 ---
 
-## 📌 What is AeroGuide?
+## 📌 What is TravelBuddy?
 
-AeroGuide is a **next-generation AI travel planning platform** that orchestrates **16 specialized AI agents** across two LangGraph pipelines to generate personalized, constraint-aware trip plans grounded in real-world data.
+TravelBuddy is a **next-generation AI travel planning platform** that orchestrates **16 specialized AI agents** across two LangGraph pipelines to generate personalized, constraint-aware trip plans grounded in real-world data.
 
-Unlike single-LLM chatbots (ChatGPT, Gemini), AeroGuide uses a **multi-agent architecture** where each agent acts as a domain expert — handling destinations, weather, hotels, transportation, budgets, and itinerary generation. The system coordinates these agents in parallel and synthesizes their results into one cohesive, actionable plan.
+Unlike single-LLM chatbots (ChatGPT, Gemini), TravelBuddy uses a **multi-agent architecture** where each agent acts as a domain expert — handling destinations, weather, hotels, transportation, budgets, and itinerary generation. The system coordinates these agents in parallel and synthesizes their results into one cohesive, actionable plan.
 
 ### 🎯 The Core Problem We Solve
 
 > Travelers currently juggle 6–12 separate platforms (flights, hotels, weather, maps, budgeting). Existing AI travel tools are generic chatbots with no domain specialization, stale training data, and no real-world price verification.
 
-**AeroGuide solves this with:**
+**TravelBuddy solves this with:**
 
-| Problem | AeroGuide Solution |
+| Problem | TravelBuddy Solution |
 |---|---|
 | **Generic AI recommendations** | 16 specialized agents, each domain-expert prompted |
 | **Stale training data** | **Vlog Intelligence Pipeline** — real YouTube travel vlog transcript extraction |
@@ -61,7 +61,7 @@ Unlike single-LLM chatbots (ChatGPT, Gemini), AeroGuide uses a **multi-agent arc
 
 ## 🏗️ Architecture Overview
 
-AeroGuide is built on a **layered, domain-separated architecture** where each layer has a single, well-defined responsibility.
+TravelBuddy is built on a **layered, domain-separated architecture** where each layer has a single, well-defined responsibility.
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -150,7 +150,7 @@ graph TB
 
 ## 🤖 The 16 Agents & How They Work
 
-AeroGuide orchestrates its agents across two independent state machine graphs managed by LangGraph. Below is the detailed breakdown of the input/output schemas, responsibilities, and system prompts of each agent.
+TravelBuddy orchestrates its agents across two independent state machine graphs managed by LangGraph. Below is the detailed breakdown of the input/output schemas, responsibilities, and system prompts of each agent.
 
 ### 📈 Graph 1: Traditional Orchestrator (8 Agents + 1 Replanner)
 
@@ -293,7 +293,7 @@ User Query
 
 ## 🗄️ Database Architecture
 
-AeroGuide utilizes **PostgreSQL 16** (Neon serverless instance) as its primary data layer, orchestrated using **SQLAlchemy 2.x ORM** and managed by **Alembic** migrations.
+TravelBuddy utilizes **PostgreSQL 16** (Neon serverless instance) as its primary data layer, orchestrated using **SQLAlchemy 2.x ORM** and managed by **Alembic** migrations.
 
 ### Entity Relationship Diagram (ERD)
 

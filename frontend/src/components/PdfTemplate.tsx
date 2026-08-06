@@ -126,7 +126,7 @@ export default function PdfTemplate({ planResult, destination, days, travelers }
         
         {/* Header Branding */}
         <div className="flex justify-between items-center z-10 border-b border-white/20 pb-6">
-          <span className="text-[20px] font-bold tracking-wider">AeroGuide AI</span>
+          <span className="text-[20px] font-bold tracking-wider">TravelBuddy AI</span>
           <span className="text-[12px] uppercase tracking-widest bg-white/10 px-4 py-1.5 rounded-full border border-white/20">
             Exclusive Travel Document
           </span>
@@ -165,7 +165,7 @@ export default function PdfTemplate({ planResult, destination, days, travelers }
           
           {/* Header */}
           <div className="flex justify-between items-center border-b border-slate-100 pb-4">
-            <span className="text-[12px] font-bold uppercase tracking-wider text-[#0058bc]">AeroGuide Travel Report</span>
+            <span className="text-[12px] font-bold uppercase tracking-wider text-[#0058bc]">TravelBuddy Travel Report</span>
             <span className="text-[11px] text-slate-400">Page 2 of {2 + itineraryPages.length + 1}</span>
           </div>
 
@@ -264,7 +264,7 @@ export default function PdfTemplate({ planResult, destination, days, travelers }
 
         {/* Footer */}
         <div className="border-t border-slate-100 pt-4 flex justify-between items-center text-[10px] text-slate-400">
-          <span>AeroGuide Itinerary Service</span>
+          <span>TravelBuddy Itinerary Service</span>
           <span>Confidential & Tailored</span>
         </div>
       </div>
@@ -314,7 +314,7 @@ export default function PdfTemplate({ planResult, destination, days, travelers }
 
           {/* Footer */}
           <div className="border-t border-slate-100 pt-4 flex justify-between items-center text-[10px] text-slate-400">
-            <span>AeroGuide Itinerary Service</span>
+            <span>TravelBuddy Itinerary Service</span>
             <span>Confidential & Tailored</span>
           </div>
         </div>
@@ -391,7 +391,7 @@ export default function PdfTemplate({ planResult, destination, days, travelers }
 
         {/* Footer */}
         <div className="border-t border-slate-100 pt-4 flex justify-between items-center text-[10px] text-slate-400">
-          <span>AeroGuide Itinerary Service</span>
+          <span>TravelBuddy Itinerary Service</span>
           <span>Confidential & Tailored</span>
         </div>
       </div>
