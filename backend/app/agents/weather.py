@@ -1,56 +1,17 @@
-import sys
-import os
 import logging
-from typing import List
 
-# Append root folder to sys.path so sibling modules like mcp_server are discoverable
-parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if parent_dir not in sys.path:
-    sys.path.insert(0, parent_dir)
+from app.tools.weather import weather_lookup
+from app.schemas.weather import WeatherRequest, WeatherIntelligence
 
 logger = logging.getLogger("app.agents.weather")
 
-try:
-    from mcp_server.tools.weather_lookup import weather_lookup
-    logger.info("Imported weather_lookup from mcp_server successfully.")
-except ImportError:
-    logger.warning("Could not import weather_lookup from mcp_server; falling back to local mock implementation.")
-    # Local fallback matching the MCP tool logic
-    def weather_lookup(location: str, days: int = 7) -> dict:
-        days = min(max(days, 1), 14)
-        forecast = []
-        for i in range(days):
-            # If Goa is requested, give a nice warm sunny forecast
-            if "goa" in location.lower():
-                temp = 31
-                rain = 15
-            else:
-                temp = 22 + (i % 3)
-                rain = 10 if i % 4 != 0 else 30
-                
-            forecast.append({
-                "day": i + 1,
-                "temp_c": temp,
-                "condition": "Sunny" if rain < 20 else "Partly Cloudy",
-                "rain_probability": f"{rain}%"
-            })
-        return {
-            "location": location,
-            "days_checked": days,
-            "average_temp_c": sum(d["temp_c"] for d in forecast) // len(forecast),
-            "forecast": forecast
-        }
-
-from app.schemas.weather import WeatherRequest, WeatherIntelligence
-
 def analyze_weather(payload: WeatherRequest) -> WeatherIntelligence:
     """
-    Invoke MCP weather tool, analyze results, and calculate suitability score.
+    Fetch a real forecast and calculate a suitability score.
     """
     location = payload.location
     days = payload.days or 7
 
-    # Call MCP weather tool
     forecast_data = weather_lookup(location=location, days=days)
     forecast = forecast_data.get("forecast", [])
 
@@ -68,7 +29,7 @@ def analyze_weather(payload: WeatherRequest) -> WeatherIntelligence:
     warnings = []
 
     for day in forecast:
-        temp = day.get("temp_c", 20)
+        temp = day.get("temp_c") or 20
         rain_str = day.get("rain_probability", "0%")
         rain_val = int(rain_str.replace("%", ""))
 

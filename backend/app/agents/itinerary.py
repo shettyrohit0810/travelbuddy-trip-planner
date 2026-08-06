@@ -1,57 +1,38 @@
-import sys
-import os
 import json
 import logging
 from typing import List
 from app.core.config import settings
 from app.schemas.itinerary import ItineraryRequest, DailySchedule, ItineraryResponse
-
-# Append root folder to sys.path so sibling modules like mcp_server are discoverable
-parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if parent_dir not in sys.path:
-    sys.path.insert(0, parent_dir)
+from app.tools.destination_search import destination_search
 
 logger = logging.getLogger("app.agents.itinerary")
 
-try:
-    from mcp_server.tools.destination_search import destination_search
-    logger.info("Imported destination_search from mcp_server successfully.")
-except ImportError:
-    logger.warning("Could not import destination_search from mcp_server; falling back to local mock implementation.")
-    # Local fallback matching the MCP tool logic
-    def destination_search(query: str, category: str = None) -> dict:
-        loc = query.lower()
-        if "goa" in loc:
-            return {
-                "activities": [
-                    {"name": "Calangute Beach Walk", "category": "beach", "rating": 4.5},
-                    {"name": "Basilica of Bom Jesus", "category": "history", "rating": 4.8},
-                    {"name": "Anjuna Flea Market", "category": "shopping", "rating": 4.3},
-                    {"name": "Dudhsagar Waterfalls Trek", "category": "nature", "rating": 4.7},
-                    {"name": "Fort Aguada Sightseeing", "category": "history", "rating": 4.6}
-                ]
-            }
-        else:
-            return {
-                "activities": [
-                    {"name": "Historic Castle Visit", "category": "history", "rating": 4.4},
-                    {"name": "Public Park Stroll", "category": "nature", "rating": 4.3},
-                    {"name": "Local Museum Walkthrough", "category": "culture", "rating": 4.6}
-                ]
-            }
+
+def _fetch_real_pois(destination: str) -> List[dict]:
+    """Real points of interest, used both to ground LLM prompts and to build the
+    rule-based fallback schedule. Returns [] (not fake data) if unavailable."""
+    try:
+        return destination_search(destination).get("activities", [])
+    except Exception as e:
+        logger.error(f"destination_search failed for {destination!r}: {e}")
+        return []
+
 
 def generate_itinerary(req: ItineraryRequest) -> ItineraryResponse:
     """
     Generate detailed daily itineraries matching days, interests, and weather parameters.
-    Uses LLMs if API keys are set; otherwise, calls the MCP tool and maps outputs.
+    Uses LLMs if API keys are set (grounded with real nearby points of interest);
+    otherwise falls back to rule-based generation.
     """
+    real_pois = _fetch_real_pois(req.destination)
+
     if settings.GEMINI_API_KEY:
         try:
             import google.generativeai as genai
             genai.configure(api_key=settings.GEMINI_API_KEY)
             model = genai.GenerativeModel("gemini-1.5-flash")
-            
-            prompt = f"Generate travel itinerary details for: {req.model_dump_json()}"
+
+            prompt = _build_grounded_prompt(req, real_pois)
             response = model.generate_content(
                 prompt,
                 generation_config=genai.GenerationConfig(
@@ -67,14 +48,25 @@ def generate_itinerary(req: ItineraryRequest) -> ItineraryResponse:
     if settings.OPENAI_API_KEY:
         try:
             from app.core.llm import generate_structured_output
-            prompt = f"Generate travel itinerary details for: {req.model_dump_json()}"
+            prompt = _build_grounded_prompt(req, real_pois)
             return generate_structured_output(prompt, ItineraryResponse)
         except Exception as e:
             logger.error(f"OpenAI/Groq itinerary generation failed, falling back: {str(e)}")
 
     # Heuristic fallback matching
     logger.info("Executing rule-based itinerary generation.")
-    return rule_based_generate(req)
+    return rule_based_generate(req, real_pois)
+
+
+def _build_grounded_prompt(req: ItineraryRequest, real_pois: List[dict]) -> str:
+    prompt = f"Generate travel itinerary details for: {req.model_dump_json()}"
+    if real_pois:
+        names = ", ".join(p["name"] for p in real_pois[:15])
+        prompt += (
+            f"\n\nGROUNDING: verified real points of interest near {req.destination}: {names}. "
+            f"Prefer these real names over invented ones wherever they fit the traveler's interests."
+        )
+    return prompt
 
 
 # A high-fidelity local database of top destinations to ensure beautiful, landmark-specific fallbacks
@@ -197,10 +189,13 @@ DESTINATION_DATABASE = {
     }
 }
 
-def rule_based_generate(req: ItineraryRequest) -> ItineraryResponse:
+def rule_based_generate(req: ItineraryRequest, real_pois: List[dict] = None) -> ItineraryResponse:
     """
-    Generates daily morning, afternoon, and evening slots using attractions from destination_search.
-    If the destination matches our high-fidelity database, it returns an exceptionally rich landmark-specific plan.
+    Generates daily morning, afternoon, and evening slots.
+    If the destination matches our curated database, returns that hand-authored plan.
+    Otherwise builds the schedule from real_pois (destination_search results) when
+    available, and only falls back to generic unnamed templates if no real data
+    could be fetched (no API key, unresolvable location, etc).
     """
     dest = req.destination
     days = req.days or 5
@@ -236,10 +231,34 @@ def rule_based_generate(req: ItineraryRequest) -> ItineraryResponse:
             itinerary=schedule
         )
 
-    # 2. General smart template generator if destination is not in our database
-    logger.info(f"Executing smart rule-based generator for unknown destination: {dest}")
+    # 2. Real points-of-interest, if destination_search returned any (see .env.example
+    # for OPENTRIPMAP_API_KEY) — grounds the schedule in real named attractions instead
+    # of generic filler text.
+    if real_pois:
+        logger.info(f"Building rule-based itinerary for {dest} from {len(real_pois)} real POIs")
+        schedule = []
+        for day in range(1, days + 1):
+            picks = [real_pois[((day - 1) * 3 + i) % len(real_pois)]["name"] for i in range(3)]
+            morning, afternoon, evening = picks
+            schedule.append(
+                DailySchedule(
+                    day=day,
+                    morning=f"Visit {morning}.",
+                    afternoon=f"Visit {afternoon}, then take a break at a nearby local cafe.",
+                    evening=f"Wind down at {evening}, or explore the surrounding neighborhood for dinner."
+                )
+            )
+        return ItineraryResponse(
+            destination=dest,
+            itinerary=schedule
+        )
+
+    # 3. Generic template generator — last resort when there's no curated entry and no
+    # real POI data (missing OPENTRIPMAP_API_KEY or an unresolvable location). Kept
+    # deliberately vague/unnamed rather than inventing specific place names.
+    logger.info(f"Executing generic rule-based generator for unknown destination: {dest}")
     schedule = []
-    
+
     # Famous fallback activity templates
     morning_activities = [
         "Arrive early at the central historic square to admire the local architecture and take photos before crowds arrive.",

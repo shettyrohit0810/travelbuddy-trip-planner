@@ -42,6 +42,14 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str | None = Field(default=None, validation_alias="GEMINI_API_KEY")
     OPENAI_API_KEY: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
 
+    # Tool-grounding external APIs (backend/app/tools/) — see KICKOFF_PROMPT.md Phase 1.
+    # Open-Meteo needs no key. Amadeus and OpenTripMap tools degrade to empty results
+    # (not fake data) when their keys are unset.
+    AMADEUS_API_KEY: str | None = Field(default=None, validation_alias="AMADEUS_API_KEY")
+    AMADEUS_API_SECRET: str | None = Field(default=None, validation_alias="AMADEUS_API_SECRET")
+    AMADEUS_HOSTNAME: str = Field(default="test.api.amadeus.com", validation_alias="AMADEUS_HOSTNAME")
+    OPENTRIPMAP_API_KEY: str | None = Field(default=None, validation_alias="OPENTRIPMAP_API_KEY")
+
     @property
     def IS_GROQ(self) -> bool:
         return bool(self.OPENAI_API_KEY and self.OPENAI_API_KEY.startswith("gsk_"))
