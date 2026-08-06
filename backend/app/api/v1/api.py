@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 from app.api.v1.endpoints import (
-    health, auth, users, tools, understanding, recommendation,
+    health, auth, users, understanding, recommendation,
     weather, transport, accommodation, itinerary, orchestrator, memory, trips,
     email, replanner, travel_intelligence, ai_chat
 )
@@ -9,7 +9,6 @@ api_router = APIRouter()
 api_router.include_router(health.router, prefix="/health", tags=["health"])
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(users.router, prefix="/users", tags=["users"])
-api_router.include_router(tools.router, prefix="/tools", tags=["tools"])
 api_router.include_router(understanding.router, prefix="/understanding", tags=["understanding"])
 api_router.include_router(recommendation.router, prefix="/recommendation", tags=["recommendation"])
 api_router.include_router(weather.router, prefix="/weather", tags=["weather"])
