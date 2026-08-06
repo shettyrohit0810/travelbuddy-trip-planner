@@ -3,6 +3,107 @@
 Running log of what was built, what was found, and what was explicitly cut, one entry
 per phase of [KICKOFF_PROMPT.md](KICKOFF_PROMPT.md).
 
+## Phase 1 — Decide the MCP layer's fate, ground the tools
+
+**Found before deciding:** the `mcp_server/` "MCP protocol" scaffolding (`server.py`'s
+stdio server, `handlers/`, the `tool_registry` decorators) was 100% unused. Every one
+of `weather.py`, `itinerary.py`, `accommodation.py`, `budget.py` bypassed it entirely
+with a plain `from mcp_server.tools.X import X` direct function call plus a
+try/except-ImportError fallback to a duplicated hardcoded copy of the same fake logic.
+Also found `destination_search` specifically was dead code beyond that: it was
+imported into `itinerary.py` but never actually called — `rule_based_generate` used a
+hand-authored `DESTINATION_DATABASE` dict instead, and the LLM path never grounded its
+prompt in real attraction data at all.
+
+**Decision (confirmed with the user):** delete the protocol scaffolding rather than
+wire up a real MCP subprocess — this app only ever runs as one process, so spawning a
+second one to talk JSON-RPC over stdio to itself would be pure complexity for zero
+behavior change. Moved the four tool functions into `backend/app/tools/` as plain
+modules, deleted `mcp_server/` outright.
+
+**Built:**
+- `backend/app/core/cache.py`: a small hand-rolled in-process TTL-cache decorator
+  (`@ttl_cache(seconds=...)`). No Redis in this stack (confirmed in
+  KICKOFF_PROMPT.md's audit), and a single-process cache is enough to avoid
+  re-hitting rate-limited external APIs for repeated lookups. No new dependency.
+- `backend/app/tools/_http.py`: minimal stdlib-only (`urllib`) JSON GET/POST helpers —
+  deliberately avoided adding `httpx`/`requests` as a new dependency for something
+  this simple (the "ask before adding a dependency" constraint in KICKOFF_PROMPT.md
+  §4.2). `httpx` is already pulled in transitively by the `openai` package, but
+  depending on that transitively without declaring it felt fragile.
+- `backend/app/tools/weather.py`: real weather via **Open-Meteo** (free, no API key).
+  Geocodes the location name, fetches a daily forecast, maps WMO weather codes to
+  condition labels. Returns an empty forecast (not fake data) if the location can't be
+  geocoded or the API call fails — `analyze_weather()` in `agents/weather.py` already
+  had a graceful "N/A" path for empty forecasts, so no caller changes needed there
+  beyond the import swap.
+- `backend/app/tools/hotel_search.py`: real hotel search via **Amadeus for
+  Developers** (self-service free/test tier) — OAuth2 client-credentials token, city
+  search to resolve an IATA city code, hotel list by city, hotel-offers pricing.
+  Requires `AMADEUS_API_KEY`/`AMADEUS_API_SECRET` (not yet supplied — see Blocked
+  below); returns an empty hotel list, not fabricated ones, when unset or any step
+  fails.
+- `backend/app/tools/destination_search.py`: real points-of-interest via
+  **OpenTripMap** (free tier) — geocodes the destination, searches a radius for
+  places, maps OpenTripMap's 1–3/1h–3h "rate" importance tier onto a comparable 0–5
+  score. Requires `OPENTRIPMAP_API_KEY` (not yet supplied); returns an empty activity
+  list, not fabricated ones, when unset or any step fails.
+- `backend/app/tools/budget_estimator.py`: relocated unchanged. This one stays a
+  deterministic rate-table estimate rather than a live-pricing API call — it's
+  presented as an estimate, not a claim of live pricing, and `optimize_budget()`
+  already overrides it with real transport/accommodation costs when those are
+  available. Grounding it in a live pricing API felt like solving a problem it
+  doesn't actually have.
+- Rewired `agents/weather.py`, `agents/accommodation.py`, `agents/budget.py`,
+  `agents/itinerary.py` to import from `app.tools.*` directly — dropped the
+  `sys.path` hack and the duplicated hardcoded-fallback function in each file (no
+  longer needed now that the tools live in the same codebase and always import).
+- **`itinerary.py` specifically**: since `destination_search` was previously dead
+  code, just swapping its backing API for a real one wouldn't have changed anything
+  observable — nothing consumed its output. Fixed that: `generate_itinerary()` now
+  fetches real POIs once and (a) injects real attraction names into the LLM prompt as
+  grounding context ("prefer these real names over invented ones"), and (b)
+  `rule_based_generate()` now has three tiers — curated `DESTINATION_DATABASE` entries
+  first (unchanged, hand-authored launch content, not per-request fabrication),
+  then a schedule built from real POI names when `destination_search` returned any,
+  and only the old generic/unnamed template text as the last resort when neither is
+  available. This was judged to be within the scope of "ground destination_search in
+  real data" (already agreed with the user) rather than new scope, since grounding a
+  tool nobody calls is meaningless — flagging it here rather than treating the
+  decision as silent.
+
+**Blocked / deferred:**
+- Hotel and attraction grounding are code-complete but **not live-verified with real
+  data** — they need `AMADEUS_API_KEY`/`AMADEUS_API_SECRET` (sign up free at
+  https://developers.amadeus.com) and `OPENTRIPMAP_API_KEY` (sign up free at
+  https://opentripmap.io/product), which only the user can obtain (per the "never
+  create accounts or enter credentials" rule). Verified instead that both tools
+  degrade honestly — empty results plus a logged warning, not fabricated Kyoto data —
+  when the keys are absent. Once keys are added to `backend/.env`, these should be
+  re-verified live with real requests before calling Phase 2 fully done.
+- `rule_based_recommend()` in `accommodation.py` still calls `hotel_search` with
+  hardcoded placeholder dates (`2026-10-01`/`2026-10-08`) rather than the trip's real
+  dates — `AccommodationRequest` has no date fields today. Once Amadeus is live this
+  will return real pricing for *a* valid date range, just not necessarily the
+  traveler's actual one. Threading real dates through means widening
+  `AccommodationRequest` and the orchestrator's state, which is more invasive than
+  this pass's tool-swap scope — left as a follow-up.
+
+**Verified live** (Docker Compose, `db` + `backend`, same local port-override
+approach as Phase 0 — `docker-compose.yml` itself untouched):
+- Weather for Tokyo vs. Reykjavik returned genuinely different, real forecasts
+  (26°C/83% rain vs. 10°C/100% rain) — not the old `22 + (i % 3)` pattern.
+- A nonsense location (`Zzqxwblahfake123`) degraded to the existing "N/A" response
+  instead of crashing.
+- `POST /accommodation/recommend` and `POST /itinerary/generate` (for a
+  non-curated destination) both returned clean, non-crashing results with the
+  expected "not configured" warnings logged — confirming the missing-key path is
+  honest rather than silently fabricating data.
+- `POST /itinerary/generate` for Goa still returns the curated hand-authored plan
+  unchanged.
+- No more `Could not import ... from mcp_server` warnings in startup logs — confirmed
+  the old dead-code import path is gone.
+
 ## Phase 0 — Security lockdown
 
 **Built:**
