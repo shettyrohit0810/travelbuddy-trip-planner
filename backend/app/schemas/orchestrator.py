@@ -12,7 +12,6 @@ from app.schemas.planner import FinalTripPlan
 class OrchestratorRequest(BaseModel):
     query: str = Field(..., description="Natural language request detailing the desired trip")
     source_city: Optional[str] = Field(default="Mumbai", description="Starting location/departure city")
-    user_id: Optional[int] = Field(default=None, description="Optional user ID for memory personalization")
 
 class OrchestratorResponse(BaseModel):
     requirements: Optional[TripRequirements] = None

@@ -4,7 +4,9 @@ from pydantic import BaseModel, Field
 from typing import Optional, List
 
 from app.core.database import get_db
+from app.api.deps import get_current_user
 from app.models.trip import Trip
+from app.models.user import User
 from app.schemas.trip import TripResponse
 from app.agents.orchestrator import plan_trip_workflow
 from app.schemas.understanding import TripRequirements
@@ -21,15 +23,16 @@ class ReplanRequest(BaseModel):
 def replan_trip_selective(
     id: int,
     payload: ReplanRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Selectively replans only the affected sections of an existing trip plan.
     """
-    trip = db.query(Trip).filter(Trip.id == id).first()
+    trip = db.query(Trip).filter(Trip.id == id, Trip.user_id == current_user.id).first()
     if not trip:
         raise HTTPException(status_code=404, detail="Trip record not found")
-        
+
     try:
         plan_data = trip.plan_data or {}
         if not isinstance(plan_data, dict):

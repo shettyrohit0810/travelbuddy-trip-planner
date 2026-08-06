@@ -4,20 +4,34 @@ from typing import Optional
 import math
 
 from app.core.database import get_db
+from app.api.deps import get_current_user
 from app.models.trip import Trip
+from app.models.user import User
 from app.schemas.trip import TripSave, TripUpdate, TripResponse, TripListResponse
 from app.agents.orchestrator import plan_trip_workflow
 
 router = APIRouter()
 
+
+def _get_owned_trip(id: int, current_user: User, db: Session) -> Trip:
+    trip = db.query(Trip).filter(Trip.id == id, Trip.user_id == current_user.id).first()
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip record not found")
+    return trip
+
+
 @router.post("", response_model=TripResponse)
-def save_trip(user_id: int, payload: TripSave, db: Session = Depends(get_db)):
+def save_trip(
+    payload: TripSave,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     """
     Save a compiled trip plan to user history.
     """
     try:
         db_trip = Trip(
-            user_id=user_id,
+            user_id=current_user.id,
             destination=payload.destination,
             days=payload.days,
             travelers=payload.travelers,
@@ -33,18 +47,18 @@ def save_trip(user_id: int, payload: TripSave, db: Session = Depends(get_db)):
 
 @router.get("", response_model=TripListResponse)
 def list_trips(
-    user_id: int,
     page: int = 1,
     limit: int = 5,
     query: Optional[str] = None,
     is_favorite: Optional[bool] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     List user trips with search, favorite filters, and pagination.
     """
     try:
-        q = db.query(Trip).filter(Trip.user_id == user_id)
+        q = db.query(Trip).filter(Trip.user_id == current_user.id)
         
         # Apply search filter
         if query:
@@ -73,24 +87,28 @@ def list_trips(
         raise HTTPException(status_code=500, detail=f"Failed to list history: {str(e)}")
 
 @router.get("/{id}", response_model=TripResponse)
-def get_trip(id: int, db: Session = Depends(get_db)):
+def get_trip(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     """
     Retrieve details of a single trip.
     """
-    trip = db.query(Trip).filter(Trip.id == id).first()
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip record not found")
-    return trip
+    return _get_owned_trip(id, current_user, db)
 
 @router.put("/{id}", response_model=TripResponse)
-def update_trip(id: int, payload: TripUpdate, db: Session = Depends(get_db)):
+def update_trip(
+    id: int,
+    payload: TripUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     """
     Toggle favorites flag or update details.
     """
-    trip = db.query(Trip).filter(Trip.id == id).first()
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip record not found")
-        
+    trip = _get_owned_trip(id, current_user, db)
+
     try:
         if payload.is_favorite is not None:
             trip.is_favorite = payload.is_favorite
@@ -101,14 +119,16 @@ def update_trip(id: int, payload: TripUpdate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Failed to update trip: {str(e)}")
 
 @router.delete("/{id}")
-def delete_trip(id: int, db: Session = Depends(get_db)):
+def delete_trip(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     """
     Delete a trip from history.
     """
-    trip = db.query(Trip).filter(Trip.id == id).first()
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip record not found")
-        
+    trip = _get_owned_trip(id, current_user, db)
+
     try:
         db.delete(trip)
         db.commit()
@@ -117,14 +137,16 @@ def delete_trip(id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Failed to delete trip: {str(e)}")
 
 @router.post("/{id}/replan", response_model=TripResponse)
-def replan_trip(id: int, db: Session = Depends(get_db)):
+def replan_trip(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     """
     Replan an existing trip by running the agent orchestrator graph.
     """
-    trip = db.query(Trip).filter(Trip.id == id).first()
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip record not found")
-        
+    trip = _get_owned_trip(id, current_user, db)
+
     try:
         # Re-run the planning graph using stored configurations
         query_prompt = f"Plan a trip to {trip.destination} for {trip.days} days and {trip.travelers} travelers"

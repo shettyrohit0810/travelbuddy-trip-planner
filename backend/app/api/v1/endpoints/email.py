@@ -3,7 +3,9 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
 from app.core.database import get_db
+from app.api.deps import get_current_user
 from app.models.trip import Trip
+from app.models.user import User
 from app.core.email import send_trip_email_background
 
 router = APIRouter()
@@ -16,13 +18,14 @@ def send_trip_email(
     id: int,
     payload: EmailSendRequest,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Sends trip plan PDF/itinerary/budget summary via email.
     Runs asynchronously via BackgroundTasks.
     """
-    trip = db.query(Trip).filter(Trip.id == id).first()
+    trip = db.query(Trip).filter(Trip.id == id, Trip.user_id == current_user.id).first()
     if not trip:
         raise HTTPException(status_code=404, detail="Trip record not found")
         
