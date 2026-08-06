@@ -23,6 +23,20 @@ def test_knapsack_select_respects_unlimited_budget():
     assert {c.name for c in selected} == {"Alpha Fort", "Beta Garden", "Gamma Point", "Delta Museum"}
 
 
+def test_knapsack_select_tie_break_is_input_order_independent():
+    # Three candidates with identical rating and cost: every 2-item combination
+    # ties on total value, so the result must come from the name-based tie-break
+    # (smallest sorted-name pair wins), not from whatever order the caller passed
+    # them in.
+    x = Candidate(name="X", category="misc", rating=3.0, coords=Coordinates(0.0, 0.0), source="test", estimated_cost=10.0)
+    y = Candidate(name="Y", category="misc", rating=3.0, coords=Coordinates(0.0, 0.01), source="test", estimated_cost=10.0)
+    z = Candidate(name="Z", category="misc", rating=3.0, coords=Coordinates(0.0, 0.02), source="test", estimated_cost=10.0)
+
+    for ordering in ([x, y, z], [y, z, x], [z, x, y], [z, y, x]):
+        selected = _knapsack_select(ordering, budget=20.0, max_items=2)
+        assert {c.name for c in selected} == {"X", "Y"}
+
+
 def test_best_ordering_ties_break_lexicographically_by_name():
     ordering = _best_ordering(
         [BETA, ALPHA],
@@ -69,6 +83,20 @@ def test_select_day_returns_empty_with_note_when_pool_is_empty():
     assert day_schedule.slots == []
     assert spent == 0.0
     assert any("no verified points of interest" in note.lower() for note in day_schedule.notes)
+
+
+def test_select_day_returns_empty_with_note_when_day_too_short_for_any_single_visit():
+    # Distinct from the empty-pool case: the pool is non-empty, but the day
+    # window is too short to fit even one visit, so the shrink loop bottoms out
+    # at max_items == 0 and select_day must still return gracefully.
+    constraints = ScheduleConstraints(days=1, day_start_min=540, day_end_min=550, visit_duration_min=120, max_slots_per_day=2)
+    day_schedule, spent = select_day(
+        day=1, pool=[ALPHA, BETA], remaining_budget=None, constraints=constraints,
+        travel_provider=HaversineTravelTimeProvider(speed_kmh=20.0),
+    )
+    assert day_schedule.slots == []
+    assert spent == 0.0
+    assert any("no combination" in note.lower() and "fit" in note.lower() for note in day_schedule.notes)
 
 
 def test_select_day_populates_slot_times_and_travel():

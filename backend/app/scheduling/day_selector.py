@@ -5,10 +5,22 @@ from app.scheduling.models import Candidate, Coordinates, DaySchedule, ScheduleC
 from app.scheduling.ports import TravelTimeProvider
 
 
+def _tie_break_key(candidates: List[Candidate], indices: Tuple[int, ...]) -> Tuple[str, ...]:
+    """Canonical, input-order-independent tie-break key for a set of chosen
+    candidate indices: the sorted tuple of their names. Two combinations with
+    equal total rating always compare via this key rather than via dict/insertion
+    order, so `_knapsack_select`'s result depends only on which candidates were
+    chosen -- never on the order the caller happened to pass them in."""
+    return tuple(sorted(candidates[i].name for i in indices))
+
+
 def _knapsack_select(candidates: List[Candidate], budget: float, max_items: int) -> List[Candidate]:
     """0/1 knapsack: maximize total rating, weight = estimated_cost, capacity =
     budget, additionally capped at max_items. Exact DP over (count, cost_used_cents)
-    states -- small in practice since candidate pools and slot counts are both small."""
+    states -- small in practice since candidate pools and slot counts are both small.
+
+    Ties (multiple combinations reaching the same maximum rating) are broken
+    deterministically by `_tie_break_key`, not by input order."""
     if not candidates or max_items <= 0:
         return []
 
@@ -28,14 +40,22 @@ def _knapsack_select(candidates: List[Candidate], budget: float, max_items: int)
                 continue
             key = (count + 1, new_used)
             new_value = value + rating
-            if key not in new_states or new_states[key][0] < new_value:
-                new_states[key] = (new_value, indices + (i,))
+            new_indices = indices + (i,)
+            existing = new_states.get(key)
+            if existing is None or new_value > existing[0] or (
+                new_value == existing[0]
+                and _tie_break_key(candidates, new_indices) < _tie_break_key(candidates, existing[1])
+            ):
+                new_states[key] = (new_value, new_indices)
         states = new_states
 
     best_value = -1.0
     best_indices: Tuple[int, ...] = ()
     for value, indices in states.values():
-        if value > best_value:
+        if value > best_value or (
+            value == best_value
+            and _tie_break_key(candidates, indices) < _tie_break_key(candidates, best_indices)
+        ):
             best_value = value
             best_indices = indices
 
@@ -95,6 +115,12 @@ def select_day(
     Returns the DaySchedule and the budget actually spent (the caller subtracts
     this from the running trip total).
     """
+    # _best_ordering brute-forces every permutation of the selected slots, i.e.
+    # O(max_slots_per_day!). 6! = 720 is still effectively instant per day; this
+    # bound exists purely to fail loudly if a future caller (e.g. request input)
+    # ever lets max_slots_per_day grow unbounded, rather than silently hanging.
+    assert constraints.max_slots_per_day <= 6, "max_slots_per_day too large for brute-force ordering (must be <= 6)"
+
     budget_for_knapsack = remaining_budget if remaining_budget is not None else float("inf")
 
     ordering: Optional[List[Tuple[Candidate, float]]] = None
@@ -117,9 +143,9 @@ def select_day(
     if not ordering:
         ordering = []
         if pool:
-            notes.append(f"no combination of available attractions fit within the time/budget limits")
+            notes.append("no combination of available attractions fit within the time/budget limits")
         else:
-            notes.append(f"no verified points of interest available to schedule")
+            notes.append("no verified points of interest available to schedule")
 
     slots: List[ScheduledSlot] = []
     clock = float(constraints.day_start_min)
