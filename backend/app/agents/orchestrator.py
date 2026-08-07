@@ -25,8 +25,19 @@ from app.schemas.accommodation import AccommodationRequest, AccommodationOption
 from app.schemas.budget import BudgetBreakdown
 from app.schemas.itinerary import ItineraryRequest, ItineraryResponse
 from app.schemas.planner import FinalTripPlan
+from app.verification.plan_verifier import (
+    verify_plan,
+    PlanVerification,
+    BUDGET_OVERRUN,
+    ACTIVITIES_OVERSPEND,
+)
 
 logger = logging.getLogger("app.agents.orchestrator")
+
+# How many times the graph may loop verify -> repair -> re-plan before giving up
+# and surfacing the unresolved violations instead of spinning. Bounded on purpose:
+# an unbounded repair loop is how "agentic" turns into "burns tokens forever".
+MAX_REPAIR_ATTEMPTS = 2
 
 # 1. Define Orchestrator Shared State
 class OrchestratorState(TypedDict):
@@ -44,6 +55,9 @@ class OrchestratorState(TypedDict):
     logs: List[str]
     retries: int
     replan_type: Optional[str]
+    verification: Optional[PlanVerification]
+    repair_attempts: int
+    repair_exhausted: bool
 
 # 2. Define Retry Decorator / Error Recovery Helper
 def run_node_with_retry(node_name: str, state: OrchestratorState, func, *args, **kwargs):
@@ -341,6 +355,121 @@ def itinerary_node(state: OrchestratorState) -> dict:
         "retries": local_state["retries"]
     }
 
+def verification_node(state: OrchestratorState) -> dict:
+    """Re-check the assembled plan against the traveler's hard constraints.
+
+    Deliberately arithmetic, not an LLM self-review: the graph routes on this
+    result, so a violation has to be a fact rather than an opinion.
+    """
+    logs = list(state.get("logs", []))
+    logs.append("Starting Verification Agent execution...")
+
+    verification = verify_plan(
+        state.get("requirements"),
+        state.get("budget"),
+        state.get("itinerary"),
+    )
+
+    if verification.valid:
+        logs.append("Verification Agent: plan satisfies all hard constraints.")
+    else:
+        for violation in verification.violations:
+            logs.append(f"Verification Agent: VIOLATION [{violation.code}] {violation.message}")
+
+    return {"verification": verification, "logs": logs}
+
+
+def repair_node(state: OrchestratorState) -> dict:
+    """Apply a targeted, deterministic fix for a budget violation.
+
+    Reduces the activities allocation by exactly the overspend and recomputes the
+    total from its components, then lets the graph re-run the itinerary so the
+    scheduler re-solves against the tighter ceiling. No LLM involved -- the repair
+    is arithmetic, so it either resolves the violation or provably cannot.
+    """
+    logs = list(state.get("logs", []))
+    attempts = state.get("repair_attempts", 0) + 1
+    verification = state.get("verification")
+    budget = state.get("budget")
+
+    reductions = [
+        v.overspend_amount for v in (verification.violations if verification else [])
+        if v.code in (BUDGET_OVERRUN, ACTIVITIES_OVERSPEND) and v.overspend_amount
+    ]
+    reduction = max(reductions) if reductions else 0.0
+
+    new_activities = max(round(budget.activities_cost - reduction, 2), 0.0)
+    new_budget = BudgetBreakdown(
+        travel_cost=budget.travel_cost,
+        accommodation_cost=budget.accommodation_cost,
+        food_cost=budget.food_cost,
+        activities_cost=new_activities,
+        buffer=budget.buffer,
+        total=round(
+            budget.travel_cost + budget.accommodation_cost + budget.food_cost
+            + new_activities + budget.buffer,
+            2,
+        ),
+    )
+
+    # If tightening changed nothing, the activities line has no headroom left and
+    # another pass would re-run the whole scheduler to reach the identical result.
+    # Mark it exhausted so the router stops now instead of burning the attempt.
+    exhausted = new_activities == budget.activities_cost
+    if exhausted:
+        logs.append(
+            f"Repair Agent (attempt {attempts}/{MAX_REPAIR_ATTEMPTS}): activities budget is "
+            f"already {new_activities} — no headroom left to absorb the {reduction} overspend. "
+            f"Stopping repairs and reporting the violation honestly."
+        )
+    else:
+        logs.append(
+            f"Repair Agent (attempt {attempts}/{MAX_REPAIR_ATTEMPTS}): tightening activities "
+            f"budget {budget.activities_cost} -> {new_activities} to absorb an overspend of "
+            f"{reduction}; re-running the scheduler against the new ceiling."
+        )
+
+    return {
+        "budget": new_budget,
+        "repair_attempts": attempts,
+        "repair_exhausted": exhausted,
+        "logs": logs,
+    }
+
+
+def verification_router(state: OrchestratorState) -> str:
+    """Decide whether to repair-and-retry or accept the plan as-is."""
+    verification = state.get("verification")
+    if verification is None or verification.valid:
+        return "node_planner"
+
+    if not verification.repairable_violations:
+        # e.g. an ungrounded fact or a scheduler-shape bug -- retrying the same
+        # deterministic pipeline would produce the identical result.
+        return "node_planner"
+
+    if state.get("repair_exhausted"):
+        # A previous repair had no headroom left to give; retrying is provably futile.
+        return "node_planner"
+
+    if state.get("repair_attempts", 0) >= MAX_REPAIR_ATTEMPTS:
+        return "node_planner"
+
+    # Check headroom BEFORE dispatching: the only lever repair_node has is the
+    # activities allocation, so if that is already at zero a repair pass would
+    # re-run the whole scheduler just to reach the identical plan. Catching it
+    # here saves that wasted pass rather than discovering it one node too late.
+    budget = state.get("budget")
+    budget_only = all(
+        v.code in (BUDGET_OVERRUN, ACTIVITIES_OVERSPEND)
+        for v in verification.repairable_violations
+    )
+    if budget is not None and budget_only and budget.activities_cost <= 0:
+        return "node_planner"
+
+    return "node_repair"
+
+
 def planner_node(state: OrchestratorState) -> dict:
     logs = list(state.get("logs", []))
     retries = state.get("retries", 0)
@@ -379,6 +508,8 @@ workflow.add_node("node_transport", transport_node)
 workflow.add_node("node_accommodation", accommodation_node)
 workflow.add_node("node_budget", budget_node)
 workflow.add_node("node_itinerary", itinerary_node)
+workflow.add_node("node_verify", verification_node)
+workflow.add_node("node_repair", repair_node)
 workflow.add_node("node_planner", planner_node)
 
 def replan_entry_router(state: OrchestratorState) -> str:
@@ -410,19 +541,35 @@ workflow.add_edge("node_accommodation", "node_budget")
 
 def budget_router(state: OrchestratorState) -> str:
     if state.get("replan_type") == "budget":
-        return "node_planner"
+        return "node_verify"
     return "node_itinerary"
 
 workflow.add_conditional_edges(
     "node_budget",
     budget_router,
     {
-        "node_planner": "node_planner",
+        "node_verify": "node_verify",
         "node_itinerary": "node_itinerary"
     }
 )
 
-workflow.add_edge("node_itinerary", "node_planner")
+# The verify -> repair -> itinerary -> verify cycle. This is the bounded replan
+# loop: the verifier decides on hard constraints, the repair step makes a targeted
+# deterministic change, and the scheduler re-solves. verification_router is what
+# terminates it -- on success, on an unrepairable violation, or on hitting
+# MAX_REPAIR_ATTEMPTS.
+workflow.add_edge("node_itinerary", "node_verify")
+
+workflow.add_conditional_edges(
+    "node_verify",
+    verification_router,
+    {
+        "node_repair": "node_repair",
+        "node_planner": "node_planner"
+    }
+)
+
+workflow.add_edge("node_repair", "node_itinerary")
 workflow.add_edge("node_planner", END)
 
 orchestrator_graph = workflow.compile()
@@ -451,7 +598,10 @@ def plan_trip_workflow(
         "plan": None,
         "logs": [],
         "retries": 0,
-        "replan_type": replan_type
+        "replan_type": replan_type,
+        "verification": None,
+        "repair_attempts": 0,
+        "repair_exhausted": False
     }
     
     if existing_state:

@@ -86,8 +86,13 @@ def rule_based_parse(query: str) -> TripRequirements:
 
     # Budget Extraction
     budget = None
-    # Matches: under 40000, Rs. 50000, $3000, 3000 USD
-    budget_match = re.search(r'(?:under|budget|rs\.?|inr|₹|\$)\s*([\d,]+)', q)
+    # Matches: under 40000, Rs. 50000, $3000, "budget of 16000", "budget of rs 8000".
+    # The optional "of" and trailing currency word matter more than they look: without
+    # them a perfectly ordinary phrasing ("with a budget of 16000") parses to no budget
+    # at all, which silently disables the hard budget constraint downstream.
+    budget_match = re.search(
+        r'(?:under|budget|rs\.?|inr|₹|\$)\s*(?:of\s+)?(?:rs\.?|inr|₹|\$)?\s*([\d,]+)', q
+    )
     if budget_match:
         # Clean currency separators
         cleaned_num = budget_match.group(1).replace(",", "")

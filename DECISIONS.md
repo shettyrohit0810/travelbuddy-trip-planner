@@ -3,6 +3,63 @@
 Running log of what was built, what was found, and what was explicitly cut, one entry
 per phase of [KICKOFF_PROMPT.md](KICKOFF_PROMPT.md).
 
+## Phase 4 — Real verifier + bounded replan loop
+
+**Built:**
+- `app/verification/plan_verifier.py` — `verify_plan()` checks an assembled plan
+  against the traveler's hard constraints. Deliberately **not** an LLM self-review:
+  every check is arithmetic or a structural invariant, so a violation is a fact the
+  graph can route on rather than an opinion. Codes: `budget_overrun`,
+  `activities_overspend`, `day_count_mismatch`, `slot_overlap`, `ungrounded_fact`.
+  Each violation carries `repairable` and (where relevant) `overspend_amount`, so the
+  repair step branches on identity instead of string-matching a message.
+- The `ungrounded_fact` check is the grounding guarantee made enforceable: every
+  scheduled slot must carry a `source` tracing it to a real tool call, or the plan
+  fails verification.
+- `verification_node` / `repair_node` / `verification_router` in `orchestrator.py`,
+  wired into a genuine LangGraph **cycle**:
+  `node_itinerary -> node_verify -> (node_repair -> node_itinerary)* -> node_planner`.
+  This is the first real cycle in the graph — everything before it was a DAG.
+- `repair_node` is deterministic arithmetic, not an LLM guess: it reduces the
+  activities allocation by exactly the overspend and recomputes the total from its
+  components, then lets the scheduler re-solve against the tighter ceiling. It either
+  resolves the violation or provably cannot.
+- The loop terminates on any of: verification passing, an unrepairable violation,
+  `MAX_REPAIR_ATTEMPTS` (2), or exhausted headroom. Unresolved violations are reported
+  honestly in the response rather than being swallowed.
+
+**Two real bugs found while verifying live (neither was in the plan):**
+1. `rule_based_parse()` could not extract "a budget of 16000" — its regex allowed no
+   filler between the keyword and the number. With no LLM key configured this is the
+   *only* parse path, so `requirements.budget` came back `None` and the entire hard
+   budget constraint was **silently inert in the default configuration**. The verifier
+   was correct to pass; its input was broken. Fixed and covered by parametrized tests.
+2. The graph's `verification` result never reached the API response — the endpoint
+   builds a fixed key set. Added `PlanVerificationOut`/`ViolationOut` and surfaced it,
+   so a client can actually see whether the plan satisfies its constraints.
+
+**Efficiency fix worth noting:** the first working version burned a full scheduler
+re-run discovering it had no headroom (reducing an already-zero activities budget by
+9312 changes nothing). Moved the headroom check into `verification_router` so the
+futile pass is never dispatched — the impossible-budget case now ends after 1 repair
+attempt instead of 2.
+
+**Verified live** (Docker Compose, committed `docker-compose.yml`, only the db host
+port remapped for this machine):
+- *Repairable case* — "2 day Kyoto trip, budget 16000": verifier flagged
+  `budget_overrun` (total 17512, over by 1512) -> repair tightened activities
+  3200 -> 1688 -> scheduler re-solved -> second verification **passed**, final total
+  exactly 16000.0, `repair_attempts: 1`.
+- *Unsatisfiable case* — same trip, budget 5000: repaired once (3200 -> 0), re-verified,
+  detected no remaining headroom, stopped, and returned `valid: false` with the
+  unresolved `budget_overrun` rather than faking success or spinning.
+- 76/76 backend tests pass.
+
+**Note on scope:** the repair lever is currently the activities allocation only. A
+budget blown by transport/accommodation costs can be *detected* but not *repaired* —
+it is reported honestly instead. Widening repair to re-select a cheaper hotel or
+transport mode is a real follow-up, not something to claim as done.
+
 ## Phase 3 — Deterministic scheduling core
 
 Built on branch `worktree-deterministic-scheduling-core`. Tasks 1–5 (pytest/hypothesis
