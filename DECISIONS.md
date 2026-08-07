@@ -3,6 +3,62 @@
 Running log of what was built, what was found, and what was explicitly cut, one entry
 per phase of [KICKOFF_PROMPT.md](KICKOFF_PROMPT.md).
 
+## Part 3 — Parallel research fan-out (measured)
+
+Weather, transport, accommodation and POI retrieval are independent given a destination
+and date range, so they now fan out from `node_destination` and converge on
+`node_research_join`. The real win is POI prefetch: a cold Overpass lookup costs 60-100s
+and previously ran *inside* the itinerary node — i.e. serialised behind budget, which
+was itself behind everything else.
+
+Required changes: `logs` and `retries` became `Annotated[..., operator.add]` reducer
+fields, and every node now returns only its own delta. Without that, concurrent branch
+writes raise `InvalidUpdateError`. `node_research_join` records which branches came back
+empty so partial failure is visible rather than silently producing a thinner plan.
+
+**Concurrency is asserted by measurement, not by inspecting the edge list.** A probe
+graph confirms peak concurrency 4 and ~1x single-node latency for 4x the work
+(`tests/agents/test_parallel_research.py`). An edge diagram looks identical whether or
+not the runtime actually overlaps anything, so the test measures wall clock.
+
+Measured with `python -m evals.bench_parallel`, which builds a sequential-edge variant
+of the production graph and runs both over the same request:
+
+| Scenario | Sequential | Parallel | Speedup |
+|---|---|---|---|
+| Cold POI cache | 257.48 s | **75.91 s** | **3.39x** |
+| Warm POI cache (median of 3) | 0.01 s | 0.01 s | 0.93x |
+
+**Read these carefully.** The cold row is one run each, and 257s exceeds what
+POI+weather+transport+accommodation should sum to — the sequential run very likely also
+hit an Overpass retry round. The mechanism is sound and the direction is real, but
+"3.39x" should not be quoted as a precise figure. The warm row showing **0.93x** is the
+honest counterpart: when every lookup is cached there is nothing to overlap, and the
+fan-out costs a little thread-dispatch overhead. Parallelism helps exactly where the
+work is slow and independent, and nowhere else.
+
+## Parts 1 & 4 — Agent infrastructure (built, NOT measured)
+
+Built: a bounded tool-calling loop (`agent_loop.py`) with hard caps on both tool calls
+and wall clock and a pluggable `AgentBrain`; real acquisition tools
+(`acquisition_tools.py`) where `geocode_candidates` returns **all** plausible
+resolutions rather than one — choosing between "Genoa, Italy (pop 580k)" and "Goa,
+India" is judgement, not a ranking rule, which is what makes the Genoa-class bug
+addressable by an agent; and a trajectory recorder capturing every call, argument,
+observation and stated reason.
+
+`LLMBrain` raises `NoBrainAvailable` when no key is configured rather than falling back
+to heuristics. A rule-based fallback would run, pass tests and emit an eval table while
+being precisely the "one LLM called several times with different prompts" fiction that
+should not be called agentic.
+
+**Blocked and explicitly unmeasured:** there is no LLM key on this machine, so the
+agent's *decision quality* is unverified. The scripted-brain tests cover control flow,
+bound enforcement, tool-error containment and trajectory fidelity — they say nothing
+about whether the agent chooses well. Recovery rate, tool calls per request, added
+latency and token cost all require a real model and remain unmeasured. Nothing about
+agentic recovery should be claimed until they are.
+
 ## Part 1-3 — Real POI grounding, widened repair, and re-measurement
 
 ### Part 1 — POI grounding via OpenStreetMap Overpass (no API key)
