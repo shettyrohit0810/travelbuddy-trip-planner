@@ -61,13 +61,20 @@ def destination_search(query: str, category: str = None) -> dict:
     activities = []
     for place in places:
         name = place.get("name")
-        if not name:
+        point = place.get("point") or {}
+        lat, lon = point.get("lat"), point.get("lon")
+        # Skip places missing a name or coordinates rather than defaulting to a
+        # fabricated (0, 0), which would silently corrupt the scheduler's
+        # travel-time math with a point in the Gulf of Guinea.
+        if not name or lat is None or lon is None:
             continue
         kinds = (place.get("kinds") or "").split(",")
         activities.append({
             "name": name,
             "category": kinds[0] if kinds and kinds[0] else "attraction",
             "rating": _RATE_TO_SCORE.get(str(place.get("rate")), 3.0),
+            "lat": lat,
+            "lon": lon,
         })
 
     return {
