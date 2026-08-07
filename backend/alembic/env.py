@@ -12,6 +12,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.core.config import settings
 from app.core.database import Base
+# Importing the model modules is REQUIRED, not decorative: Base.metadata is only
+# populated as a side effect of the mapped classes being imported. Without this,
+# `alembic revision --autogenerate` compares the DB against empty metadata and
+# silently emits a migration containing `pass` -- which is exactly why this
+# project had no migration history despite Alembic being installed.
+from app.models import user as _user_model  # noqa: F401
+from app.models import trip as _trip_model  # noqa: F401
+from app.models import memory as _memory_model  # noqa: F401
 
 # this is the Alembic Config object, which provides access to the values within the .ini file in use.
 config = context.config

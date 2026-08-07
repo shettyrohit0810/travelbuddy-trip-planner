@@ -11,12 +11,15 @@ from app.middleware.error_handler import ErrorHandlingMiddleware
 from app.core.database import engine, Base
 from app.models import User, UserMemory, Trip
 
-# Automatically create database tables for convenience/health-check testing
-try:
-    Base.metadata.create_all(bind=engine)
-except Exception as e:
-    # Log but do not block app startup if DB is offline (let health check catch it)
-    print(f"Database table creation skipped/failed: {str(e)}")
+# Schema is owned by Alembic (`alembic upgrade head`), NOT by create_all().
+#
+# create_all() used to run here, which is why this project had migrations that
+# could never apply: the app raced ahead and built the tables itself, so a later
+# `alembic upgrade head` hit "relation already exists" and any migration that
+# altered a column silently never ran against a database the app had already
+# shaped. One owner of the schema, and it has to be the one with a version
+# history. Run migrations before starting the app -- see the entrypoint below and
+# the README.
 
 
 # Configure logging
