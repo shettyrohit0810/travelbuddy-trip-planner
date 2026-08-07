@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend — migrations, tests, eval
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password123
+          POSTGRES_DB: trip_planner
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d trip_planner"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      POSTGRES_SERVER: localhost
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password123
+      POSTGRES_DB: trip_planner
+      POSTGRES_PORT: 5432
+      # No LLM or travel-API keys in CI. That is deliberate: the pipeline must be
+      # able to prove it degrades honestly (empty results + warnings) rather than
+      # fabricating data, and that path is exactly what runs without keys.
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Apply migrations from an empty database
+        # Alembic owns the schema (app/main.py no longer calls create_all), so this
+        # also verifies the migration actually applies on a cold database.
+        run: alembic upgrade head
+
+      - name: Check migrations match the models (no drift)
+        # A migration that silently does nothing is the exact failure this project
+        # already had once, so assert autogenerate finds nothing left to do.
+        run: |
+          alembic revision --autogenerate -m "ci-drift-check" 2>&1 | tee /tmp/drift.log
+          if grep -qiE "Detected (added|removed|changed)" /tmp/drift.log; then
+            echo "::error::Models and migrations have drifted. Generate a migration."
+            grep -iE "Detected (added|removed|changed)" /tmp/drift.log
+            exit 1
+          fi
+          echo "No drift detected."
+
+      - name: Run tests
+        run: pytest -q
+
+      - name: Run eval harness
+        # Exits non-zero on any crash or verifier/expectation mismatch.
+        run: python -m evals.run_eval --json eval-results.json
+
+      - name: Upload eval results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: backend/eval-results.json
+          if-no-files-found: warn
+
+  frontend:
+    name: Frontend — typecheck and build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
