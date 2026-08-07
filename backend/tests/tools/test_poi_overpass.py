@@ -1,4 +1,16 @@
+import os
 from unittest.mock import patch
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _force_live_poi_path(monkeypatch):
+    """These tests cover the parsing/query logic, so they must run the live path even
+    when TRAVELBUDDY_DISABLE_LIVE_POI is set in the environment (CI sets it on push).
+    Without this the escape hatch short-circuits before the mocks and every assertion
+    silently sees an empty result."""
+    monkeypatch.delenv("TRAVELBUDDY_DISABLE_LIVE_POI", raising=False)
 
 from app.tools.poi_overpass import overpass_poi_search, _cost_for, _notability_score, _coords_of
 from app.scheduling.costs import StaticCostEstimator, ACTIVITY_COST_BY_CATEGORY
@@ -126,3 +138,19 @@ def test_geocode_reports_which_place_it_actually_resolved_to(mock_get):
     _, _, resolved = _geocode("Goa")
     # The caller must be able to tell the user WHICH Goa was planned.
     assert "," in resolved and resolved.split(",")[1].strip()
+
+
+def test_disable_flag_short_circuits_before_any_network_call(monkeypatch):
+    """The CI/offline escape hatch must not reach the network at all."""
+    monkeypatch.setenv("TRAVELBUDDY_DISABLE_LIVE_POI", "1")
+    overpass_poi_search.cache_clear()
+
+    def _explode(*a, **k):
+        raise AssertionError("network was called despite TRAVELBUDDY_DISABLE_LIVE_POI")
+
+    monkeypatch.setattr("app.tools.poi_overpass._query_overpass", _explode)
+    monkeypatch.setattr("app.tools.poi_overpass._geocode", _explode)
+
+    result = overpass_poi_search("Kyoto")
+    assert result["activities"] == []
+    assert result["source"] == "disabled"
