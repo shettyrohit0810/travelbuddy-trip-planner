@@ -139,6 +139,20 @@ def test_llm_brain_refuses_to_construct_without_a_key(monkeypatch):
     """No silent rule-based substitute: absence of a model must be visible."""
     from app.core import config
     monkeypatch.setattr(config.settings, "OPENAI_API_KEY", None, raising=False)
+    monkeypatch.setattr(config.settings, "XAI_API_KEY", None, raising=False)
     monkeypatch.setattr(config.settings, "GEMINI_API_KEY", None, raising=False)
     with pytest.raises(NoBrainAvailable):
         LLMBrain()
+
+
+def test_llm_brain_constructs_for_each_supported_provider(monkeypatch):
+    from app.core import config
+    for attr, value, expected in [
+        ("XAI_API_KEY", "xai-test", "xai"),
+        ("OPENAI_API_KEY", "gsk_test", "groq"),
+        ("OPENAI_API_KEY", "sk-test", "openai"),
+    ]:
+        monkeypatch.setattr(config.settings, "XAI_API_KEY", None, raising=False)
+        monkeypatch.setattr(config.settings, "OPENAI_API_KEY", None, raising=False)
+        monkeypatch.setattr(config.settings, attr, value, raising=False)
+        assert LLMBrain().provider == expected

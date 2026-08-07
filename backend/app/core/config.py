@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     # LLM Integrations
     GEMINI_API_KEY: str | None = Field(default=None, validation_alias="GEMINI_API_KEY")
     OPENAI_API_KEY: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
+    # xAI (Grok) speaks the OpenAI wire format, so it plugs in as another base_url
+    # rather than needing its own client. Kept as a separate setting instead of
+    # overloading OPENAI_API_KEY so `LLM_PROVIDER` can report which one is actually live.
+    XAI_API_KEY: str | None = Field(default=None, validation_alias="XAI_API_KEY")
 
     # Tool-grounding external APIs (backend/app/tools/) — see KICKOFF_PROMPT.md Phase 1.
     # Open-Meteo needs no key. Amadeus and OpenTripMap tools degrade to empty results
@@ -65,6 +69,20 @@ class Settings(BaseSettings):
     AMADEUS_API_SECRET: str | None = Field(default=None, validation_alias="AMADEUS_API_SECRET")
     AMADEUS_HOSTNAME: str = Field(default="test.api.amadeus.com", validation_alias="AMADEUS_HOSTNAME")
     OPENTRIPMAP_API_KEY: str | None = Field(default=None, validation_alias="OPENTRIPMAP_API_KEY")
+
+    @property
+    def LLM_PROVIDER(self) -> str | None:
+        """Which OpenAI-compatible provider is configured, or None.
+
+        Order matters only for determinism, not preference -- if several keys are set
+        the first wins, and the resolved name is logged so a surprising model choice is
+        traceable rather than mysterious.
+        """
+        if self.XAI_API_KEY:
+            return "xai"
+        if self.OPENAI_API_KEY:
+            return "groq" if self.OPENAI_API_KEY.startswith("gsk_") else "openai"
+        return None
 
     @property
     def IS_GROQ(self) -> bool:

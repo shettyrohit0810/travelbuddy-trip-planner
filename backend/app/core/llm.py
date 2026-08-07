@@ -9,18 +9,37 @@ logger = logging.getLogger("app.core.llm")
 
 T = TypeVar("T", bound=BaseModel)
 
+# Every supported provider speaks the OpenAI wire format, so they differ only by
+# base_url and model name. Adding one is a table entry, not a new client.
+PROVIDERS = {
+    "openai": {"base_url": None, "model": "gpt-4o-mini"},
+    "groq": {"base_url": "https://api.groq.com/openai/v1", "model": "llama-3.3-70b-versatile"},
+    "xai": {"base_url": "https://api.x.ai/v1", "model": "grok-3"},
+}
+
+
+def _api_key() -> str | None:
+    provider = settings.LLM_PROVIDER
+    if provider == "xai":
+        return settings.XAI_API_KEY
+    return settings.OPENAI_API_KEY
+
+
 def get_openai_client() -> OpenAI:
-    if settings.IS_GROQ:
-        return OpenAI(
-            api_key=settings.OPENAI_API_KEY,
-            base_url="https://api.groq.com/openai/v1"
-        )
-    return OpenAI(api_key=settings.OPENAI_API_KEY)
+    provider = settings.LLM_PROVIDER
+    if provider is None:
+        raise RuntimeError("No LLM provider configured (set XAI_API_KEY or OPENAI_API_KEY)")
+    config = PROVIDERS[provider]
+    if config["base_url"]:
+        return OpenAI(api_key=_api_key(), base_url=config["base_url"])
+    return OpenAI(api_key=_api_key())
+
 
 def get_model_name() -> str:
-    if settings.IS_GROQ:
-        return "llama-3.3-70b-versatile"
-    return "gpt-4o-mini"
+    provider = settings.LLM_PROVIDER
+    if provider is None:
+        raise RuntimeError("No LLM provider configured (set XAI_API_KEY or OPENAI_API_KEY)")
+    return PROVIDERS[provider]["model"]
 
 def generate_structured_output(prompt: str, response_schema: Type[T]) -> T:
     client = get_openai_client()

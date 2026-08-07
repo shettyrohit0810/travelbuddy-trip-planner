@@ -61,8 +61,10 @@ class LLMBrain:
 
     def __init__(self, model_hint: str = "default"):
         from app.core.config import settings
-        if not (settings.OPENAI_API_KEY or settings.GEMINI_API_KEY):
-            raise NoBrainAvailable("no OPENAI_API_KEY or GEMINI_API_KEY configured")
+        provider = settings.LLM_PROVIDER
+        if provider is None:
+            raise NoBrainAvailable("no XAI_API_KEY or OPENAI_API_KEY configured")
+        self.provider = provider
         self.model_hint = model_hint
 
     def decide(self, goal: str, tool_specs, history):
