@@ -4,7 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
-  workflow_dispatch:
+  workflow_dispatch:      # manual run, exercises live POI lookups
+  schedule:
+    - cron: '17 6 * * 1'  # weekly, catches upstream OSM/Overpass drift
 
 concurrency:
   group: ci-${{ github.ref }}

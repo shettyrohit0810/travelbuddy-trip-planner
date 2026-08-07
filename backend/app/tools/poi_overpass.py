@@ -21,6 +21,7 @@ trusting any number this module produces:
    back to the category rate estimate. Only an explicit `fee=no` yields 0.0.
 """
 import logging
+import os
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -244,6 +245,14 @@ def overpass_poi_search(location: str) -> dict:
     Cached for 24h per location: Overpass is a shared community endpoint with real
     rate limits, and repeated eval runs would otherwise hammer it.
     """
+    # Escape hatch for CI and offline runs. Overpass is a free community service and
+    # hitting it on every push is both slow (60-100s per unseen city) and impolite.
+    # Set to any non-empty value to take the honest-degradation path instead.
+    if os.environ.get("TRAVELBUDDY_DISABLE_LIVE_POI"):
+        logger.info("TRAVELBUDDY_DISABLE_LIVE_POI set; skipping live Overpass lookup.")
+        return {"destination": location, "results_count": 0, "activities": [],
+                "source": "disabled", "resolved_location": None}
+
     geo = _geocode(location)
     if geo is None:
         return {"destination": location, "results_count": 0, "activities": [],
