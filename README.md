@@ -20,6 +20,11 @@
 
 ---
 
+> **Fork notice.** Built on [Akash7367/Trip_planer_Ai](https://github.com/Akash7367/Trip_planer_Ai).
+> This fork rebuilt the planning core — deterministic scheduler, hard-constraint
+> verifier with a bounded repair loop, migrations, and security hardening. See
+> [Credits](#-credits) for the precise split.
+
 ## 📌 What is TravelBuddy?
 
 TravelBuddy plans trips with a **LangGraph agent pipeline whose itinerary is decided by a deterministic scheduler, not by an LLM**. The LLM narrates prose over stops that are already fixed; it cannot reorder, invent, drop, or rename one.
@@ -847,21 +852,52 @@ Detailed OpenAPI docs are rendered at `/docs` when the API is running.
 
 ## 📊 Benchmarks & Performance Metrics
 
+Produced by `python -m evals.run_eval` (`backend/evals/`) over 10 benchmark cases
+spanning ordinary, tight-but-repairable, genuinely infeasible, and adversarial inputs.
+Reproduce it yourself — these are the harness's actual output, not estimates.
+
 | Metric | Measured Value |
 |---|---|
-| **Average Plan Execution Latency** | 45–90 seconds (16 parallel agent cycles) |
-| **Vlog Extraction Verification Rate** | ~95% confidence alignment |
-| **LLM Fallback SLA** | 100% uptime with Groq backup |
-| **API Success Rate** | > 99.2% in staging tests |
+| Cases run / crashes | 10 / **0** |
+| Verifier agreed with expected outcome | **6/6** constrained cases (100%) |
+| Mean plan latency | **0.93 s** |
+| p95 plan latency | **1.61 s** |
+| Total repair iterations across all cases | 3 |
+| Backend tests | **76 passing** |
+| Stops scheduled | **0** — see caveat |
+
+> **Caveat, stated plainly:** the run above had no `OPENTRIPMAP_API_KEY`, so no
+> point-of-interest source was reachable and **zero stops were scheduled**. The latency
+> figures therefore exclude live POI lookups, and the grounding rate is unmeasured. The
+> harness prints this warning itself rather than letting the numbers be misread. With a
+> key configured these need re-measuring.
 
 ---
 
-## 👨‍💻 Contributing & Contact
+## 👨‍💻 Credits
 
-**Akash Kumar** — AI/ML Engineer
+This is a **fork**, and the split of work is worth being precise about.
 
-[![GitHub](https://img.shields.io/badge/GitHub-Akash7367-181717?style=flat-square&logo=github)](https://github.com/Akash7367)
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-akash--kumar-0077B5?style=flat-square&logo=linkedin)](https://www.linkedin.com/in/akash-kumar-298113264/)
-[![Portfolio](https://img.shields.io/badge/Portfolio-Visit-0058bc?style=flat-square)](https://portfolio-c2xg.vercel.app)
+**Original project — [Akash Kumar (@Akash7367)](https://github.com/Akash7367)**
+([upstream repo](https://github.com/Akash7367/Trip_planer_Ai)). The Next.js frontend,
+FastAPI scaffolding, authentication, data models, and the initial domain agents are his
+work.
 
-*Built with ❤️ using LangGraph, FastAPI, and Next.js. Give us a ⭐ on GitHub if you like this project!*
+**This fork — [Rohit Shetty (@shettyrohit0810)](https://github.com/shettyrohit0810).**
+Rebuilt the planning core:
+
+- **Deterministic scheduling core** — knapsack selection under a budget ceiling with
+  travel-time-aware ordering, plus property-based tests that caught a real
+  budget-soundness bug (sub-cent costs quantizing to zero and being treated as free).
+- **Hard-constraint verifier and bounded repair loop** — the first genuine cycle in the
+  graph; the LLM can no longer decide the itinerary, only narrate it.
+- **Grounding enforcement** — every scheduled stop must carry a source attribution or
+  fail verification; tools return empty results rather than fabricating places.
+- **Security lockdown** — removed an unauthenticated remote-code-execution endpoint and
+  added auth plus ownership checks across every resource route.
+- **Schema ownership** — replaced `create_all()` with real Alembic migrations.
+- **Removed fabricated UI** — dashboards that displayed invented figures and a
+  hardcoded "94% confidence score" now render real data or an honest empty state.
+
+See [DECISIONS.md](DECISIONS.md) for the full engineering log, including bugs found and
+scope deliberately cut.
