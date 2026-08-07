@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import Any, List, Optional
 from app.schemas.understanding import TripRequirements
 from app.schemas.weather import WeatherIntelligence
 from app.schemas.transport import TransportOption
@@ -26,6 +26,28 @@ class PlanVerificationOut(BaseModel):
     repair_attempts: int = Field(default=0, description="How many repair passes the graph ran")
 
 
+class TrajectoryStepOut(BaseModel):
+    index: int
+    kind: str = Field(..., description="tool_call | decision | outcome")
+    name: str
+    arguments: Optional[dict] = None
+    observation: Optional[Any] = Field(default=None, description="What the tool actually returned")
+    reasoning: Optional[str] = Field(default=None, description="Why the agent took this step")
+    duration_ms: Optional[float] = None
+    error: Optional[str] = None
+
+
+class TrajectoryOut(BaseModel):
+    agent: str
+    goal: str
+    steps: List[TrajectoryStepOut] = Field(default_factory=list)
+    outcome: Optional[str] = Field(default=None, description="succeeded | gave_up | budget_exhausted | timeout | error | unavailable")
+    summary: Optional[str] = None
+    tool_calls_used: int = 0
+    tool_call_budget: Optional[int] = None
+    wall_clock_ms: Optional[float] = None
+
+
 class OrchestratorResponse(BaseModel):
     requirements: Optional[TripRequirements] = None
     destination: Optional[str] = None
@@ -36,6 +58,7 @@ class OrchestratorResponse(BaseModel):
     itinerary: Optional[ItineraryResponse] = None
     plan: Optional[FinalTripPlan] = None
     verification: Optional[PlanVerificationOut] = None
+    trajectories: List[TrajectoryOut] = Field(default_factory=list, description="Agent traces for this request; empty when no agent was needed")
     logs: List[str] = Field(default_factory=list)
     success: bool = True
     error: Optional[str] = None

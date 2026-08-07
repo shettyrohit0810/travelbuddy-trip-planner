@@ -64,6 +64,8 @@ class OrchestratorState(TypedDict):
     repair_exhausted: bool
     budget_baseline: Optional[BudgetBreakdown]
     poi_prefetch: Optional[dict]
+    # Agent traces, merged across branches like logs. Rendered by the trace view.
+    trajectories: Annotated[List[dict], operator.add]
 
 # 2. Define Retry Decorator / Error Recovery Helper
 def run_node_with_retry(node_name: str, state: OrchestratorState, func, *args, **kwargs):
@@ -572,21 +574,31 @@ def planner_node(state: OrchestratorState) -> dict:
         "retries": local_state["retries"]
     }
 
+# A trip needs roughly this many candidates per day for the scheduler to have any
+# real choice; below it the knapsack is just taking whatever exists.
+MIN_CANDIDATES_PER_DAY = 3
+
+
 def poi_prefetch_node(state: OrchestratorState) -> dict:
     """Warm the POI lookup concurrently with the other research nodes.
 
-    This exists purely for latency. A cold Overpass lookup costs 60-100s and used to
-    run *inside* the itinerary node -- i.e. after weather, transport, accommodation and
+    This exists mostly for latency. A cold Overpass lookup costs 60-100s and used to run
+    *inside* the itinerary node -- i.e. after weather, transport, accommodation and
     budget had all finished, serialising the single slowest call in the pipeline behind
     everything else. Running it on its own branch overlaps it with work that does not
     depend on it.
 
-    It deliberately stores the raw provider result rather than scheduler Candidates:
-    the itinerary node still owns interpretation, so this node cannot change what gets
-    scheduled -- only when the data arrives.
+    It is also where the acquisition agent is invoked when the deterministic lookup
+    comes back too thin to fill the trip. The agent may only change WHAT IS RETRIEVED --
+    a wider radius, a relaxed notability filter, a different resolution of an ambiguous
+    name. It never touches the scheduler, the verifier, or any budget arithmetic.
     """
     logs = []
     destination = state["destination"] or "Goa"
+    reqs = state.get("requirements")
+    days = reqs.days if reqs and reqs.days else 5
+    needed = days * MIN_CANDIDATES_PER_DAY
+
     try:
         from app.tools.destination_search import destination_search
         result = destination_search(destination)
@@ -594,12 +606,95 @@ def poi_prefetch_node(state: OrchestratorState) -> dict:
             f"POI Prefetch: {result.get('results_count', 0)} candidate(s) for "
             f"{result.get('resolved_location') or destination} via {result.get('source')}."
         )
-        return {"poi_prefetch": result, "logs": logs}
     except Exception as e:
         # Never fatal: the itinerary node re-fetches if this is absent, and a failed
         # prefetch should cost latency, not the whole request.
         logs.append(f"POI Prefetch failed ({e}); itinerary will fetch on demand.")
         return {"poi_prefetch": None, "logs": logs}
+
+    found = result.get("results_count", 0)
+    if found >= needed:
+        return {"poi_prefetch": result, "logs": logs}
+
+    logs.append(
+        f"POI Prefetch returned {found} candidate(s), below the {needed} a {days}-day "
+        f"trip needs. Escalating to the acquisition agent."
+    )
+    agent_result, trajectory = _run_acquisition_agent(destination, found, needed)
+    logs.append(f"Acquisition agent: {trajectory.outcome} — {trajectory.summary}")
+
+    return {
+        "poi_prefetch": agent_result or result,
+        "logs": logs,
+        "trajectories": [trajectory.to_dict()],
+    }
+
+
+def _run_acquisition_agent(destination: str, found: int, needed: int):
+    """Invoke the bounded acquisition agent. Returns (poi_result_or_None, Trajectory).
+
+    Records an explicit `unavailable` trajectory when no model is configured, rather
+    than silently skipping. An empty trace and a trace that says "no model was
+    available" are very different things to whoever reads it later.
+    """
+    from app.agents.trajectory import Trajectory
+    from app.agents.agent_loop import LLMBrain, NoBrainAvailable, run_agent
+    from app.agents import acquisition_tools
+
+    goal = (
+        f"Find at least {needed} real points of interest for a trip to {destination!r}. "
+        f"The default lookup found only {found}. Investigate why and try alternatives."
+    )
+
+    try:
+        brain = LLMBrain()
+    except NoBrainAvailable as e:
+        trajectory = Trajectory(agent="acquisition", goal=goal)
+        trajectory.outcome = "unavailable"
+        trajectory.summary = (
+            f"No LLM configured ({e}), so no agent ran. The plan proceeds with the "
+            f"{found} candidate(s) the deterministic lookup found."
+        )
+        trajectory.record("outcome", "unavailable", reasoning=trajectory.summary)
+        return None, trajectory
+
+    def summarize_observation(tool_name, observation):
+        # Keep the brain's context small: it needs counts and names to decide, not
+        # 120 coordinate pairs.
+        if isinstance(observation, dict) and "pois" in observation:
+            return {k: v for k, v in observation.items() if k != "pois"}
+        return observation
+
+    trajectory = run_agent(
+        agent_name="acquisition",
+        goal=goal,
+        brain=brain,
+        tool_specs=acquisition_tools.TOOL_SPECS,
+        tool_impls=acquisition_tools.TOOL_IMPLS,
+        max_tool_calls=6,
+        wall_clock_budget_s=120.0,
+        observation_summarizer=summarize_observation,
+    )
+
+    # Take the best POI set the agent actually observed. Reading it out of the recorded
+    # observations rather than trusting a summary means the agent cannot report finding
+    # places it never retrieved.
+    best = None
+    for step in trajectory.steps:
+        obs = step.observation
+        if step.name == "search_pois" and isinstance(obs, dict) and obs.get("pois"):
+            if best is None or len(obs["pois"]) > len(best["pois"]):
+                best = obs
+    if not best:
+        return None, trajectory
+
+    return {
+        "destination": destination,
+        "resolved_location": None,
+        "results_count": len(best["pois"]),
+        "activities": best["pois"],
+        "source": "overpass",
+    }, trajectory
 
 
 def research_join_node(state: OrchestratorState) -> dict:
@@ -744,6 +839,7 @@ def plan_trip_workflow(
         "retries": 0,
         "replan_type": replan_type,
         "poi_prefetch": None,
+        "trajectories": [],
         "verification": None,
         "repair_attempts": 0,
         "repair_exhausted": False,

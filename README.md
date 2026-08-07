@@ -62,6 +62,19 @@ This is a work in progress, and a few claims are deliberately **not** made:
 - **Geocoding is a weak link.** Open-Meteo has no entry for some well-known regions, so
   a request can resolve to a different place of the same name. The itinerary now says
   which place it actually planned rather than substituting silently.
+- **The agentic layer is built but UNMEASURED — treat every agent claim as frozen.**
+  There is a bounded tool-calling loop, real acquisition tools, a trajectory recorder
+  and a trace view in the UI. No LLM key is configured on the development machine, so
+  **no agent has ever actually made a decision.** Tests drive the loop with a scripted
+  brain, which verifies control flow, budget enforcement and trace fidelity — and says
+  nothing about decision quality. Recovery rate, tool calls per request, added latency
+  and token cost are all unmeasured. `LLMBrain` raises rather than falling back to
+  heuristics, so a run without a key is visibly `unavailable` instead of quietly
+  pretending. **Nothing about agentic recovery should be claimed until those numbers
+  exist.**
+- **Parallel execution is real and measured** (see Benchmarks): research branches run
+  concurrently, verified by measuring peak concurrency and wall clock rather than by
+  reading the edge list.
 - The repair loop spends across activities, food and lodging, each floored. Transport
   is deliberately not reducible, so a transport-dominated overrun is partially absorbed
   and then reported unresolved rather than "fixed" by rewriting a real price.
@@ -888,6 +901,25 @@ weak: every linked POI scores 4.0–4.5 on the notability proxy, so ties break
 alphabetically and the [sample Kyoto itinerary](docs/samples/kyoto-3day-real-itinerary.md)
 is all early-alphabet temples while Kinkaku-ji sits unselected in the candidate pool.
 That is a real limitation, not a rounding detail.
+
+### Parallel research fan-out
+
+Weather, transport, accommodation and POI retrieval are independent given a destination,
+so they run concurrently and converge before the scheduler. Measured with
+`python -m evals.bench_parallel`, which builds a sequential-edge variant of the real
+graph and runs both over the same request:
+
+| Scenario | Sequential | Parallel | Speedup |
+|---|---|---|---|
+| Cold POI cache | 257.48 s | **75.91 s** | **3.39x** |
+| Warm POI cache (median of 3) | 0.01 s | 0.01 s | 0.93x |
+
+Both rows are worth reading. The cold speedup is real in mechanism — a 60–100s POI
+lookup now overlaps the other research calls instead of following them — but it is one
+run each and 257 s exceeds what those nodes should sum to, so that run likely also hit
+an Overpass retry. Do not quote "3.39x" as precise. The warm row at **0.93x** is the
+honest counterpart: with everything cached there is nothing to overlap and the fan-out
+costs slight dispatch overhead.
 
 **Sample output:** [docs/samples/kyoto-3day-real-itinerary.md](docs/samples/kyoto-3day-real-itinerary.md)
 — a real 3-day Kyoto plan, every stop from live OpenStreetMap data with source

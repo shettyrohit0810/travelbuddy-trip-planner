@@ -3,6 +3,43 @@
 Running log of what was built, what was found, and what was explicitly cut, one entry
 per phase of [KICKOFF_PROMPT.md](KICKOFF_PROMPT.md).
 
+## Part 4 — Trajectory surface (API + trace view)
+
+**Built:** `agents/trajectory.py` (recorder), `TrajectoryOut`/`TrajectoryStepOut` on the
+orchestrator response, and `AgentTraceView.tsx` rendering a step-by-step trace on the
+plan page — each step expandable to its raw arguments and the actual observation.
+
+The agent is invoked from `poi_prefetch_node` when the deterministic lookup returns
+fewer candidates than `days * MIN_CANDIDATES_PER_DAY`. It may only change **what is
+retrieved** (radius, notability filter, which resolution of an ambiguous name); it never
+touches the scheduler, the verifier, or budget arithmetic. Its results are read back out
+of the *recorded observations* rather than from any summary it produces, so it cannot
+report finding places it never actually retrieved.
+
+`unavailable` is a first-class outcome with its own neutral styling. "No model was
+configured" and "no agent was needed" are very different states, and a trace view that
+renders them identically would be actively misleading.
+
+**Verified in the browser** (Next.js dev server, real backend): the API returns a
+populated `trajectories` array (status 200, full step structure), the trace view renders
+goal / outcome badge / tool-call budget / elapsed time / per-step reasoning, steps expand
+to show arguments and raw observations, and the `unavailable` badge is visibly distinct.
+`tsc --noEmit` clean, `next build` succeeds.
+
+**Bug found while verifying, and fixed:** the Phase-5 `NoDecode` change silently broke
+the *other* CORS format. `assemble_cors_origins` returned JSON-array strings unparsed, so
+`BACKEND_CORS_ORIGINS=["http://localhost:3111"]` crashed startup with a bare `list_type`
+error — the exact format that worked before `NoDecode` was introduced. The validator now
+owns both formats, with a parametrized regression test. This is the second time this
+field has broken; it now has tests specifically because it keeps being changed from one
+side without checking the other.
+
+**Explicitly NOT done, and frozen until an LLM key exists:** Parts 1 (agent wired into a
+real recovery), 2 (infeasibility strategy) and 5 (agentic eval). No agent has made a real
+decision. Every number those parts ask for — recovery rate, tool calls per request, added
+latency, token cost, correct-infeasibility rate — remains unmeasured, and the README now
+says so under "Honest status".
+
 ## Part 3 — Parallel research fan-out (measured)
 
 Weather, transport, accommodation and POI retrieval are independent given a destination

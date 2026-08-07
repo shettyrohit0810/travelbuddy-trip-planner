@@ -9,6 +9,7 @@ import ThemeToggle from '@/components/ThemeToggle';
 import LanguageSelector from '@/components/LanguageSelector';
 import AIWorkspace from '@/components/workspace/AIWorkspace';
 import { getDailyLandingImage } from '@/lib/unsplash';
+import AgentTraceView, { Trajectory } from '@/components/workspace/AgentTraceView';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -32,6 +33,7 @@ function PlanTripContent() {
   const [isPlanning, setIsPlanning] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const [planResult, setPlanResult] = useState<any>(null);
+  const [trajectories, setTrajectories] = useState<Trajectory[]>([]);
   const [planningError, setPlanningError] = useState<string | null>(null);
   const [originalQueryText, setOriginalQueryText] = useState('Plan a trip');
 
@@ -56,6 +58,7 @@ function PlanTripContent() {
     setPlanningError(null);
     setLogs(["Initializing multi-agent orchestrator connection..."]);
     setPlanResult(null);
+    setTrajectories([]);
 
     const logStages = [
       "Initializing Travel Intelligence Agent Graph...",
@@ -123,6 +126,7 @@ function PlanTripContent() {
       if (res.ok) {
         const data = await res.json();
         setPlanResult(data.plan);
+        setTrajectories(data.trajectories || []);
         setLogs(prev => [...prev, ...data.logs, "SUCCESS: Complete trip plan compiled successfully!"]);
       } else {
         const errData = await res.json();
@@ -350,6 +354,10 @@ function PlanTripContent() {
                 originalQuery={originalQueryText}
                 onRegenerate={() => generateInstantPlan(originalQueryText)}
               />
+
+              <div className="mt-6">
+                <AgentTraceView trajectories={trajectories} />
+              </div>
             </div>
           )}
         </main>

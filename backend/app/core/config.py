@@ -22,10 +22,22 @@ class Settings(BaseSettings):
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> Union[List[str], str]:
-        if isinstance(v, str) and not v.startswith("["):
-            return [i.strip() for i in v.split(",")]
-        elif isinstance(v, (list, str)):
+        """Accept BOTH `a,b` and `["a","b"]` from the environment.
+
+        This validator now owns all parsing because the field is annotated NoDecode.
+        The JSON branch is not optional: before NoDecode, pydantic-settings decoded
+        JSON arrays itself and crashed on comma-separated values; adding NoDecode
+        fixed that and silently broke the opposite case, so any existing .env using
+        the JSON form failed at startup with a bare `list_type` error.
+        """
+        if isinstance(v, list):
             return v
+        if isinstance(v, str):
+            text = v.strip()
+            if text.startswith("["):
+                import json
+                return json.loads(text)
+            return [item.strip() for item in text.split(",") if item.strip()]
         raise ValueError(v)
 
     # Database

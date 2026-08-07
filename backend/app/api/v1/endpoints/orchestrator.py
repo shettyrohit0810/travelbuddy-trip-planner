@@ -7,6 +7,7 @@ from app.schemas.orchestrator import (
     OrchestratorResponse,
     PlanVerificationOut,
     ViolationOut,
+    TrajectoryOut,
 )
 
 router = APIRouter()
@@ -54,6 +55,7 @@ def plan_trip(
             itinerary=result.get("itinerary"),
             plan=result.get("plan"),
             verification=verification_out,
+            trajectories=[TrajectoryOut(**t) for t in (result.get("trajectories") or [])],
             logs=result.get("logs", []),
             success=True
         )
