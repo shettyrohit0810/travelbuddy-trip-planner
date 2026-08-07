@@ -6,6 +6,7 @@
 
 ### *A deterministic scheduler with a bounded verify-and-repair loop, orchestrated in LangGraph.*
 
+[![CI](https://github.com/shettyrohit0810/travelbuddy-trip-planner/actions/workflows/ci.yml/badge.svg)](https://github.com/shettyrohit0810/travelbuddy-trip-planner/actions/workflows/ci.yml)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?style=flat-square&logo=fastapi)](https://fastapi.tiangolo.com)
 [![Next.js](https://img.shields.io/badge/Next.js-15-black?style=flat-square&logo=next.js)](https://nextjs.org)
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2+-orange?style=flat-square)](https://langchain-ai.github.io/langgraph/)
