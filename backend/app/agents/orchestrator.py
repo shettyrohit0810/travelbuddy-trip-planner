@@ -58,6 +58,7 @@ class OrchestratorState(TypedDict):
     verification: Optional[PlanVerification]
     repair_attempts: int
     repair_exhausted: bool
+    budget_baseline: Optional[BudgetBreakdown]
 
 # 2. Define Retry Decorator / Error Recovery Helper
 def run_node_with_retry(node_name: str, state: OrchestratorState, func, *args, **kwargs):
@@ -379,18 +380,64 @@ def verification_node(state: OrchestratorState) -> dict:
     return {"verification": verification, "logs": logs}
 
 
+# Order in which repair spends down allocations. Activities first because they are the
+# most discretionary and the scheduler can genuinely re-solve against a tighter ceiling;
+# food next; lodging last among the reducible lines because "cheaper hotel" degrades the
+# trip more than "fewer paid attractions".
+#
+# Transport is deliberately NOT reducible: the transport agent picks a concrete mode
+# (flight/train) with a concrete cost, so arbitrarily writing that number down would
+# produce a plan whose total no longer corresponds to any real option -- a budget that
+# balances only because it lies. An overrun driven by transport is reported as
+# unresolved instead.
+REPAIR_LEVERS = ("activities_cost", "food_cost", "accommodation_cost")
+
+# Floors: how far each line may be driven down, as a fraction of its original value.
+# Zeroing lodging or food outright would "satisfy" the budget by pretending the
+# traveller neither sleeps nor eats.
+REPAIR_FLOOR_FRACTION = {
+    "activities_cost": 0.0,
+    "food_cost": 0.4,
+    "accommodation_cost": 0.5,
+}
+
+
+def _floor_for(baseline: "BudgetBreakdown", lever: str) -> float:
+    """Absolute floor for a lever, always relative to the ORIGINAL allocation.
+
+    Deriving the floor from the *current* value instead is a subtle trap: each pass
+    would take a fraction of an already-reduced number, so the line approaches zero
+    without ever reaching a floor (Zeno-style) and "exhausted" never becomes true.
+    Anchoring to the baseline makes the floor a fixed point the loop can actually hit.
+    """
+    return round(getattr(baseline, lever) * REPAIR_FLOOR_FRACTION[lever], 2)
+
+
+def _repair_headroom(budget: "BudgetBreakdown", baseline: Optional["BudgetBreakdown"] = None) -> float:
+    """Total reducible amount across every lever, given the floors."""
+    baseline = baseline or budget
+    return sum(
+        max(round(getattr(budget, lever) - _floor_for(baseline, lever), 2), 0.0)
+        for lever in REPAIR_LEVERS
+    )
+
+
 def repair_node(state: OrchestratorState) -> dict:
     """Apply a targeted, deterministic fix for a budget violation.
 
-    Reduces the activities allocation by exactly the overspend and recomputes the
-    total from its components, then lets the graph re-run the itinerary so the
-    scheduler re-solves against the tighter ceiling. No LLM involved -- the repair
-    is arithmetic, so it either resolves the violation or provably cannot.
+    Spends the required reduction across the levers in REPAIR_LEVERS order, each bounded
+    by its floor, then recomputes the total from its components and lets the graph
+    re-run the itinerary so the scheduler re-solves against the tighter ceiling. No LLM
+    involved -- the repair is arithmetic, so it either resolves the violation or provably
+    cannot.
     """
     logs = list(state.get("logs", []))
     attempts = state.get("repair_attempts", 0) + 1
     verification = state.get("verification")
     budget = state.get("budget")
+    # Captured on the first repair pass so floors stay anchored to the original plan
+    # rather than drifting downward with each reduction.
+    baseline = state.get("budget_baseline") or budget
 
     reductions = [
         v.overspend_amount for v in (verification.violations if verification else [])
@@ -398,39 +445,60 @@ def repair_node(state: OrchestratorState) -> dict:
     ]
     reduction = max(reductions) if reductions else 0.0
 
-    new_activities = max(round(budget.activities_cost - reduction, 2), 0.0)
+    remaining = reduction
+    new_values = {lever: getattr(budget, lever) for lever in REPAIR_LEVERS}
+    pulled = []
+
+    for lever in REPAIR_LEVERS:
+        if remaining <= 0:
+            break
+        current = new_values[lever]
+        floor = _floor_for(baseline, lever)
+        available = max(round(current - floor, 2), 0.0)
+        if available <= 0:
+            continue
+        take = min(available, remaining)
+        new_values[lever] = round(current - take, 2)
+        remaining = round(remaining - take, 2)
+        pulled.append(f"{lever} {current} -> {new_values[lever]}")
+
     new_budget = BudgetBreakdown(
         travel_cost=budget.travel_cost,
-        accommodation_cost=budget.accommodation_cost,
-        food_cost=budget.food_cost,
-        activities_cost=new_activities,
+        accommodation_cost=new_values["accommodation_cost"],
+        food_cost=new_values["food_cost"],
+        activities_cost=new_values["activities_cost"],
         buffer=budget.buffer,
         total=round(
-            budget.travel_cost + budget.accommodation_cost + budget.food_cost
-            + new_activities + budget.buffer,
+            budget.travel_cost + new_values["accommodation_cost"] + new_values["food_cost"]
+            + new_values["activities_cost"] + budget.buffer,
             2,
         ),
     )
 
-    # If tightening changed nothing, the activities line has no headroom left and
-    # another pass would re-run the whole scheduler to reach the identical result.
-    # Mark it exhausted so the router stops now instead of burning the attempt.
-    exhausted = new_activities == budget.activities_cost
+    # If nothing moved, every lever is already at its floor and another pass would
+    # re-run the whole scheduler to reach the identical result. Mark it exhausted so
+    # the router stops now instead of burning the attempt.
+    exhausted = not pulled
     if exhausted:
         logs.append(
-            f"Repair Agent (attempt {attempts}/{MAX_REPAIR_ATTEMPTS}): activities budget is "
-            f"already {new_activities} — no headroom left to absorb the {reduction} overspend. "
-            f"Stopping repairs and reporting the violation honestly."
+            f"Repair Agent (attempt {attempts}/{MAX_REPAIR_ATTEMPTS}): every reducible "
+            f"allocation is already at its floor — no headroom left to absorb the "
+            f"{reduction} overspend. Stopping repairs and reporting the violation honestly."
         )
     else:
+        shortfall = (
+            f" Still {remaining} short; transport is not reducible, so this may remain unresolved."
+            if remaining > 0 else ""
+        )
         logs.append(
-            f"Repair Agent (attempt {attempts}/{MAX_REPAIR_ATTEMPTS}): tightening activities "
-            f"budget {budget.activities_cost} -> {new_activities} to absorb an overspend of "
-            f"{reduction}; re-running the scheduler against the new ceiling."
+            f"Repair Agent (attempt {attempts}/{MAX_REPAIR_ATTEMPTS}): absorbing an overspend "
+            f"of {reduction} via {', '.join(pulled)}; re-running the scheduler against the new "
+            f"ceiling.{shortfall}"
         )
 
     return {
         "budget": new_budget,
+        "budget_baseline": baseline,
         "repair_attempts": attempts,
         "repair_exhausted": exhausted,
         "logs": logs,
@@ -464,7 +532,7 @@ def verification_router(state: OrchestratorState) -> str:
         v.code in (BUDGET_OVERRUN, ACTIVITIES_OVERSPEND)
         for v in verification.repairable_violations
     )
-    if budget is not None and budget_only and budget.activities_cost <= 0:
+    if budget is not None and budget_only and _repair_headroom(budget, state.get("budget_baseline")) <= 0:
         return "node_planner"
 
     return "node_repair"
@@ -601,7 +669,8 @@ def plan_trip_workflow(
         "replan_type": replan_type,
         "verification": None,
         "repair_attempts": 0,
-        "repair_exhausted": False
+        "repair_exhausted": False,
+        "budget_baseline": None
     }
     
     if existing_state:

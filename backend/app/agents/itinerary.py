@@ -26,7 +26,12 @@ def _fetch_candidates(destination: str) -> List[Candidate]:
     fake data) if destination_search is unavailable or the location can't be
     resolved."""
     try:
-        activities = destination_search(destination).get("activities", [])
+        result = destination_search(destination)
+        activities = result.get("activities", [])
+        # Carry the provider through as the slot's source attribution -- the verifier
+        # rejects any scheduled fact that cannot be traced back to a real tool call,
+        # so this must reflect where the data actually came from.
+        source = result.get("source") or "unknown"
     except Exception as e:
         logger.error(f"destination_search failed for {destination!r}: {e}")
         return []
@@ -38,13 +43,19 @@ def _fetch_candidates(destination: str) -> List[Candidate]:
         if lat is None or lon is None:
             continue
         category = a.get("category", "attraction")
+        # Prefer a per-POI cost when the provider supplied one (Overpass derives it
+        # from the `fee` tag). Fall back to the category rate otherwise -- never to
+        # zero, which would let an unpriced stop slip past the budget ceiling.
+        cost = a.get("estimated_cost")
+        if cost is None:
+            cost = estimator.estimate(category)
         candidates.append(Candidate(
             name=a["name"],
             category=category,
             rating=float(a.get("rating", 3.0)),
             coords=Coordinates(lat=lat, lon=lon),
-            source="opentripmap",
-            estimated_cost=estimator.estimate(category),
+            source=source,
+            estimated_cost=float(cost),
         ))
     return candidates
 

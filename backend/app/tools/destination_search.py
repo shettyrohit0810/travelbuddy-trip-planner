@@ -2,6 +2,7 @@ import logging
 from app.core.config import settings
 from app.core.cache import ttl_cache
 from app.tools._http import get_json
+from app.tools.poi_overpass import overpass_poi_search
 
 logger = logging.getLogger("app.tools.destination_search")
 
@@ -33,8 +34,11 @@ def destination_search(query: str, category: str = None) -> dict:
     """
     api_key = settings.OPENTRIPMAP_API_KEY
     if not api_key:
-        logger.warning("OPENTRIPMAP_API_KEY not configured; destination_search returning no results.")
-        return {"destination": query, "results_count": 0, "activities": [], "source": "unavailable"}
+        # No key is the DEFAULT path, not a failure: Overpass needs no account, so a
+        # fresh clone still produces really-grounded itineraries. OpenTripMap stays
+        # supported for its richer importance ranking when a key is available.
+        logger.info("OPENTRIPMAP_API_KEY not set; using keyless OpenStreetMap Overpass for POIs.")
+        return overpass_poi_search(query)
 
     try:
         coords = _geocode(query, api_key)

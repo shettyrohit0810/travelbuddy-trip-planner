@@ -1,3 +1,4 @@
+import pytest
 from app.agents.orchestrator import (
     verification_node,
     repair_node,
@@ -113,15 +114,16 @@ def test_repair_then_verify_actually_resolves_a_fixable_overrun():
     assert second["verification"].valid
 
 
-def test_repair_node_flags_exhaustion_when_there_is_no_headroom_left():
-    """Reducing 0.0 -> 0.0 cannot help; re-running the scheduler would be pure waste."""
+def test_repair_continues_into_other_levers_when_activities_hits_zero():
+    """Superseded by the widened lever set: a zero activities budget is no longer the
+    end of the line, because food and lodging can still absorb some of the overspend."""
     v = PlanVerification(valid=False, violations=[
         Violation(code=BUDGET_OVERRUN, message="x", repairable=True, overspend_amount=9000.0)
     ])
     state = {"logs": [], "verification": v, "budget": _budget(activities=0.0), "repair_attempts": 1}
     out = repair_node(state)
-    assert out["repair_exhausted"] is True
-    assert any("no headroom left" in line for line in out["logs"])
+    assert out["repair_exhausted"] is False
+    assert out["budget"].food_cost < 100.0
 
 
 def test_router_stops_immediately_once_repair_is_exhausted():
@@ -141,14 +143,14 @@ def test_repair_node_does_not_flag_exhaustion_when_it_can_still_reduce():
     assert out["repair_exhausted"] is False
 
 
-def test_router_skips_repair_entirely_when_activities_budget_is_already_zero():
-    """Repair's only lever is the activities allocation. At zero, dispatching a
-    repair pass would re-run the whole scheduler to reach an identical plan."""
+def test_router_still_repairs_when_only_activities_is_zero():
+    """Superseded: with food and lodging levers available there is still headroom, so
+    the router should dispatch rather than give up at zero activities."""
     v = PlanVerification(valid=False, violations=[
         Violation(code=BUDGET_OVERRUN, message="x", repairable=True, overspend_amount=9000.0)
     ])
     state = {"verification": v, "repair_attempts": 0, "budget": _budget(activities=0.0)}
-    assert verification_router(state) == "node_planner"
+    assert verification_router(state) == "node_repair"
 
 
 def test_router_still_repairs_when_activities_budget_has_headroom():
@@ -157,3 +159,114 @@ def test_router_still_repairs_when_activities_budget_has_headroom():
     ])
     state = {"verification": v, "repair_attempts": 0, "budget": _budget(activities=300.0)}
     assert verification_router(state) == "node_repair"
+
+
+# --- widened repair levers ----------------------------------------------------
+
+from app.agents.orchestrator import (
+    REPAIR_LEVERS, REPAIR_FLOOR_FRACTION, _repair_headroom, _floor_for as _floor,
+)
+
+
+def _overrun(amount):
+    return PlanVerification(valid=False, violations=[
+        Violation(code=BUDGET_OVERRUN, message="x", repairable=True, overspend_amount=amount)
+    ])
+
+
+def test_repair_spends_activities_first_before_touching_food_or_lodging():
+    """Activities are the most discretionary lever, so a small overrun must not
+    degrade lodging when activities alone can absorb it."""
+    state = {"logs": [], "verification": _overrun(100.0),
+             "budget": _budget(total=1000.0, activities=300.0), "repair_attempts": 0}
+    out = repair_node(state)
+    assert out["budget"].activities_cost == 200.0
+    assert out["budget"].food_cost == 100.0            # untouched
+    assert out["budget"].accommodation_cost == 200.0   # untouched
+
+
+def test_lodging_driven_overrun_is_repaired_once_activities_are_exhausted():
+    """An overrun larger than the activities line must cascade into food and lodging."""
+    state = {"logs": [], "verification": _overrun(500.0),
+             "budget": _budget(total=1000.0, activities=300.0), "repair_attempts": 0}
+    out = repair_node(state)
+    b = out["budget"]
+    assert b.activities_cost == 0.0                 # fully spent
+    assert b.food_cost < 100.0                      # cascaded into food
+    assert b.total < 1000.0
+    assert out["repair_exhausted"] is False
+
+
+def test_repair_respects_floors_and_never_zeroes_food_or_lodging():
+    """A budget 'balanced' by assuming the traveller neither eats nor sleeps is a lie."""
+    state = {"logs": [], "verification": _overrun(99999.0),
+             "budget": _budget(total=1000.0, activities=300.0), "repair_attempts": 0}
+    b = repair_node(state)["budget"]
+    assert b.activities_cost == 0.0
+    assert b.food_cost == pytest.approx(100.0 * REPAIR_FLOOR_FRACTION["food_cost"])
+    assert b.accommodation_cost == pytest.approx(200.0 * REPAIR_FLOOR_FRACTION["accommodation_cost"])
+    assert b.food_cost > 0 and b.accommodation_cost > 0
+
+
+def test_transport_is_never_reduced_because_it_maps_to_a_real_option():
+    state = {"logs": [], "verification": _overrun(99999.0),
+             "budget": _budget(total=1000.0, activities=300.0), "repair_attempts": 0}
+    out = repair_node(state)
+    assert out["budget"].travel_cost == 400.0   # unchanged
+    assert "travel_cost" not in REPAIR_LEVERS
+
+
+def test_multi_category_overrun_reports_shortfall_when_transport_dominates():
+    """Transport isn't reducible, so a transport-driven overrun should be partially
+    absorbed and then honestly reported as still-unresolved."""
+    state = {"logs": [], "verification": _overrun(99999.0),
+             "budget": _budget(total=1000.0, activities=300.0), "repair_attempts": 0}
+    out = repair_node(state)
+    assert any("not reducible" in line for line in out["logs"])
+
+
+def test_repair_is_exhausted_when_every_lever_sits_at_its_floor():
+    """Floors are anchored to the ORIGINAL budget, so the state must carry the baseline
+    -- which is exactly what repair_node threads through after its first pass."""
+    baseline = _budget(total=1000.0, activities=300.0)
+    floored = BudgetBreakdown(
+        travel_cost=400.0,
+        accommodation_cost=_floor(baseline, "accommodation_cost"),
+        food_cost=_floor(baseline, "food_cost"),
+        activities_cost=0.0, buffer=0.0, total=540.0,
+    )
+    out = repair_node({"logs": [], "verification": _overrun(500.0), "budget": floored,
+                       "budget_baseline": baseline, "repair_attempts": 1})
+    assert out["repair_exhausted"] is True
+    assert any("already at its floor" in line for line in out["logs"])
+
+
+def test_router_stops_when_total_headroom_across_all_levers_is_gone():
+    """The loop must still terminate now that there are three levers, not one."""
+    baseline = _budget(total=1000.0, activities=300.0)
+    floored = BudgetBreakdown(
+        travel_cost=400.0,
+        accommodation_cost=_floor(baseline, "accommodation_cost"),
+        food_cost=_floor(baseline, "food_cost"),
+        activities_cost=0.0, buffer=0.0, total=540.0,
+    )
+    assert _repair_headroom(floored, baseline) == pytest.approx(0.0)
+    assert verification_router({
+        "verification": _overrun(500.0), "repair_attempts": 0,
+        "budget": floored, "budget_baseline": baseline,
+    }) == "node_planner"
+
+
+def test_floors_are_anchored_to_the_original_budget_not_the_current_one():
+    """Guards the Zeno bug: floors derived from the CURRENT value let each pass shave
+    another fraction, so a lever approaches zero without ever reaching a floor and
+    'exhausted' never fires."""
+    baseline = _budget(total=1000.0, activities=300.0)
+    once = repair_node({"logs": [], "verification": _overrun(99999.0),
+                        "budget": baseline, "repair_attempts": 0})
+    twice = repair_node({"logs": [], "verification": _overrun(99999.0),
+                         "budget": once["budget"], "budget_baseline": baseline,
+                         "repair_attempts": 1})
+    assert twice["budget"].food_cost == once["budget"].food_cost
+    assert twice["budget"].accommodation_cost == once["budget"].accommodation_cost
+    assert twice["repair_exhausted"] is True
