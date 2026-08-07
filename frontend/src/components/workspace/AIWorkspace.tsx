@@ -214,6 +214,7 @@ export default function AIWorkspace({
           {activeTab === 'budget' && (
             <AICard title="Budget Index & Cost Breakdown" icon="payments">
               <BudgetDashboard 
+                budgetSummary={currentPlan.budget_summary}
                 destination={destinationName}
                 peopleCount={currentPlan.trip_summary?.people || 1}
                 daysCount={currentPlan.trip_summary?.days || 5}

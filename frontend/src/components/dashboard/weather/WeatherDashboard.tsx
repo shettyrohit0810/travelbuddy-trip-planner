@@ -3,7 +3,6 @@
 import React, { useMemo } from 'react';
 import PackingAdvisor from './PackingAdvisor';
 import TravelAdvisory from './TravelAdvisory';
-import WeatherRadarMap from './WeatherRadarMap';
 
 interface WeatherDashboardProps {
   destination?: string;
@@ -112,7 +111,6 @@ export default function WeatherDashboard({
 
       {/* Radar Map & Advisories */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <WeatherRadarMap destinationName={destName} />
         <PackingAdvisor temperature={rawTemp} rainProb={rainProb} />
       </div>
 

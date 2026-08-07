@@ -360,6 +360,7 @@ export default function TripPlanResults({ user_id, planResult, planningError, so
 
           {/* Dynamic Redesigned Budget & Expense Intelligence Hub */}
           <BudgetDashboard 
+            budgetSummary={currentPlan.budget_summary}
             destination={destinationName}
             peopleCount={currentPlan.trip_summary?.people || currentPlan.travelers || 1}
             daysCount={currentPlan.trip_summary?.days || currentPlan.days || 5}
