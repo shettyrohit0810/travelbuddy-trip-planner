@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   db:
@@ -30,7 +29,9 @@ services:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=password123
       - POSTGRES_DB=trip_planner
-      - POSTGRES_PORT=5433
+      # 5432, not the host-published 5433: inside the compose network the backend
+      # talks to the db container directly, where Postgres listens on 5432.
+      - POSTGRES_PORT=5432
       - BACKEND_CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
     depends_on:
       db:

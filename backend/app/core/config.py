@@ -1,14 +1,18 @@
 import os
-from typing import List, Union
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Annotated, List, Union
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from pydantic import Field, field_validator
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "TravelBuddy API"
     API_V1_STR: str = "/api/v1"
-    
+
     # CORS
-    BACKEND_CORS_ORIGINS: List[str] = [
+    # NoDecode is required: without it pydantic-settings JSON-decodes env vars for
+    # complex types BEFORE field validators run, so the plain comma-separated form
+    # (`a,b`) that assemble_cors_origins below exists to handle would crash startup
+    # with a JSONDecodeError instead of ever reaching the validator.
+    BACKEND_CORS_ORIGINS: Annotated[List[str], NoDecode] = [
         "http://localhost:3000", 
         "http://127.0.0.1:3000",
         "http://localhost:3001",
