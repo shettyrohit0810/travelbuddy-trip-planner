@@ -1,5 +1,6 @@
 import logging
-from typing import TypedDict, List, Optional
+import operator
+from typing import Annotated, TypedDict, List, Optional
 from langgraph.graph import StateGraph, END
 
 # Import database session
@@ -52,13 +53,17 @@ class OrchestratorState(TypedDict):
     budget: Optional[BudgetBreakdown]
     itinerary: Optional[ItineraryResponse]
     plan: Optional[FinalTripPlan]
-    logs: List[str]
-    retries: int
+    # Annotated with a reducer because parallel branches write these concurrently.
+    # Each node returns only the entries IT produced; LangGraph concatenates them.
+    # Without this, fanning out raises InvalidUpdateError on concurrent writes.
+    logs: Annotated[List[str], operator.add]
+    retries: Annotated[int, operator.add]
     replan_type: Optional[str]
     verification: Optional[PlanVerification]
     repair_attempts: int
     repair_exhausted: bool
     budget_baseline: Optional[BudgetBreakdown]
+    poi_prefetch: Optional[dict]
 
 # 2. Define Retry Decorator / Error Recovery Helper
 def run_node_with_retry(node_name: str, state: OrchestratorState, func, *args, **kwargs):
@@ -81,8 +86,8 @@ def run_node_with_retry(node_name: str, state: OrchestratorState, func, *args, *
 
 # 3. Define Graph Nodes
 def understanding_node(state: OrchestratorState) -> dict:
-    logs = list(state.get("logs", []))
-    retries = state.get("retries", 0)
+    logs = []  # delta only -- the reducer merges this into the shared log
+    retries = 0  # delta only
     user_id = state.get("user_id")
     
     local_state = {"logs": logs, "retries": retries}
@@ -124,8 +129,8 @@ def understanding_node(state: OrchestratorState) -> dict:
     }
 
 def destination_node(state: OrchestratorState) -> dict:
-    logs = list(state.get("logs", []))
-    retries = state.get("retries", 0)
+    logs = []  # delta only -- the reducer merges this into the shared log
+    retries = 0  # delta only
     local_state = {"logs": logs, "retries": retries}
     
     reqs = state["requirements"]
@@ -158,8 +163,8 @@ def destination_node(state: OrchestratorState) -> dict:
     }
 
 def weather_node(state: OrchestratorState) -> dict:
-    logs = list(state.get("logs", []))
-    retries = state.get("retries", 0)
+    logs = []  # delta only -- the reducer merges this into the shared log
+    retries = 0  # delta only
     local_state = {"logs": logs, "retries": retries}
     
     destination = state["destination"] or "Goa"
@@ -182,8 +187,8 @@ def weather_node(state: OrchestratorState) -> dict:
     }
 
 def transport_node(state: OrchestratorState) -> dict:
-    logs = list(state.get("logs", []))
-    retries = state.get("retries", 0)
+    logs = []  # delta only -- the reducer merges this into the shared log
+    retries = 0  # delta only
     local_state = {"logs": logs, "retries": retries}
     
     destination = state["destination"] or "Goa"
@@ -212,8 +217,8 @@ def transport_node(state: OrchestratorState) -> dict:
     }
 
 def accommodation_node(state: OrchestratorState) -> dict:
-    logs = list(state.get("logs", []))
-    retries = state.get("retries", 0)
+    logs = []  # delta only -- the reducer merges this into the shared log
+    retries = 0  # delta only
     user_id = state.get("user_id")
     local_state = {"logs": logs, "retries": retries}
     
@@ -268,8 +273,8 @@ def accommodation_node(state: OrchestratorState) -> dict:
     }
 
 def budget_node(state: OrchestratorState) -> dict:
-    logs = list(state.get("logs", []))
-    retries = state.get("retries", 0)
+    logs = []  # delta only -- the reducer merges this into the shared log
+    retries = 0  # delta only
     local_state = {"logs": logs, "retries": retries}
     
     destination = state["destination"] or "Goa"
@@ -304,8 +309,8 @@ def budget_node(state: OrchestratorState) -> dict:
     }
 
 def itinerary_node(state: OrchestratorState) -> dict:
-    logs = list(state.get("logs", []))
-    retries = state.get("retries", 0)
+    logs = []  # delta only -- the reducer merges this into the shared log
+    retries = 0  # delta only
     local_state = {"logs": logs, "retries": retries}
     
     destination = state["destination"] or "Goa"
@@ -346,7 +351,8 @@ def itinerary_node(state: OrchestratorState) -> dict:
         "Itinerary Agent",
         local_state,
         generate_itinerary,
-        itinerary_req
+        itinerary_req,
+        prefetched_pois=state.get("poi_prefetch"),
     )
     
     local_state["logs"].append("Itinerary Generation Agent complete. Workflow finalized.")
@@ -362,7 +368,7 @@ def verification_node(state: OrchestratorState) -> dict:
     Deliberately arithmetic, not an LLM self-review: the graph routes on this
     result, so a violation has to be a fact rather than an opinion.
     """
-    logs = list(state.get("logs", []))
+    logs = []  # delta only -- the reducer merges this into the shared log
     logs.append("Starting Verification Agent execution...")
 
     verification = verify_plan(
@@ -431,7 +437,7 @@ def repair_node(state: OrchestratorState) -> dict:
     involved -- the repair is arithmetic, so it either resolves the violation or provably
     cannot.
     """
-    logs = list(state.get("logs", []))
+    logs = []  # delta only -- the reducer merges this into the shared log
     attempts = state.get("repair_attempts", 0) + 1
     verification = state.get("verification")
     budget = state.get("budget")
@@ -539,8 +545,8 @@ def verification_router(state: OrchestratorState) -> str:
 
 
 def planner_node(state: OrchestratorState) -> dict:
-    logs = list(state.get("logs", []))
-    retries = state.get("retries", 0)
+    logs = []  # delta only -- the reducer merges this into the shared log
+    retries = 0  # delta only
     local_state = {"logs": logs, "retries": retries}
 
     # Extract top options
@@ -566,12 +572,70 @@ def planner_node(state: OrchestratorState) -> dict:
         "retries": local_state["retries"]
     }
 
+def poi_prefetch_node(state: OrchestratorState) -> dict:
+    """Warm the POI lookup concurrently with the other research nodes.
+
+    This exists purely for latency. A cold Overpass lookup costs 60-100s and used to
+    run *inside* the itinerary node -- i.e. after weather, transport, accommodation and
+    budget had all finished, serialising the single slowest call in the pipeline behind
+    everything else. Running it on its own branch overlaps it with work that does not
+    depend on it.
+
+    It deliberately stores the raw provider result rather than scheduler Candidates:
+    the itinerary node still owns interpretation, so this node cannot change what gets
+    scheduled -- only when the data arrives.
+    """
+    logs = []
+    destination = state["destination"] or "Goa"
+    try:
+        from app.tools.destination_search import destination_search
+        result = destination_search(destination)
+        logs.append(
+            f"POI Prefetch: {result.get('results_count', 0)} candidate(s) for "
+            f"{result.get('resolved_location') or destination} via {result.get('source')}."
+        )
+        return {"poi_prefetch": result, "logs": logs}
+    except Exception as e:
+        # Never fatal: the itinerary node re-fetches if this is absent, and a failed
+        # prefetch should cost latency, not the whole request.
+        logs.append(f"POI Prefetch failed ({e}); itinerary will fetch on demand.")
+        return {"poi_prefetch": None, "logs": logs}
+
+
+def research_join_node(state: OrchestratorState) -> dict:
+    """Barrier where the parallel research branches converge.
+
+    LangGraph fans in automatically once every inbound edge has produced its update;
+    this node exists to name that point and to record which branches came back empty,
+    so a partial failure is visible rather than silently producing a thinner plan.
+    """
+    missing = []
+    if not state.get("weather"):
+        missing.append("weather")
+    if not state.get("transport"):
+        missing.append("transport")
+    if not state.get("accommodation"):
+        missing.append("accommodation")
+    prefetch = state.get("poi_prefetch")
+    if not prefetch or not prefetch.get("activities"):
+        missing.append("points of interest")
+
+    if missing:
+        return {"logs": [
+            f"Research phase complete with gaps: {', '.join(missing)} unavailable. "
+            f"Proceeding with what resolved rather than failing the request."
+        ]}
+    return {"logs": ["Research phase complete; all branches returned data."]}
+
+
 # 4. Assemble Graph Workflow
 workflow = StateGraph(OrchestratorState)
 
 workflow.add_node("node_understanding", understanding_node)
 workflow.add_node("node_destination", destination_node)
 workflow.add_node("node_weather", weather_node)
+workflow.add_node("node_poi_prefetch", poi_prefetch_node)
+workflow.add_node("node_research_join", research_join_node)
 workflow.add_node("node_transport", transport_node)
 workflow.add_node("node_accommodation", accommodation_node)
 workflow.add_node("node_budget", budget_node)
@@ -602,10 +666,22 @@ workflow.set_conditional_entry_point(
 )
 
 workflow.add_edge("node_understanding", "node_destination")
+
+# Parallel research fan-out. Weather, transport, accommodation and POI retrieval are
+# all independent given a destination and date range -- none reads another's output --
+# so they run concurrently and converge on node_research_join. Budget genuinely depends
+# on transport and accommodation, so it stays downstream of the join.
 workflow.add_edge("node_destination", "node_weather")
-workflow.add_edge("node_weather", "node_transport")
-workflow.add_edge("node_transport", "node_accommodation")
-workflow.add_edge("node_accommodation", "node_budget")
+workflow.add_edge("node_destination", "node_transport")
+workflow.add_edge("node_destination", "node_accommodation")
+workflow.add_edge("node_destination", "node_poi_prefetch")
+
+workflow.add_edge("node_weather", "node_research_join")
+workflow.add_edge("node_transport", "node_research_join")
+workflow.add_edge("node_accommodation", "node_research_join")
+workflow.add_edge("node_poi_prefetch", "node_research_join")
+
+workflow.add_edge("node_research_join", "node_budget")
 
 def budget_router(state: OrchestratorState) -> str:
     if state.get("replan_type") == "budget":
@@ -667,6 +743,7 @@ def plan_trip_workflow(
         "logs": [],
         "retries": 0,
         "replan_type": replan_type,
+        "poi_prefetch": None,
         "verification": None,
         "repair_attempts": 0,
         "repair_exhausted": False,

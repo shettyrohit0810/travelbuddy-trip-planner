@@ -21,12 +21,14 @@ from app.scheduling.costs import StaticCostEstimator
 logger = logging.getLogger("app.agents.itinerary")
 
 
-def _fetch_candidates(destination: str) -> Tuple[List[Candidate], Optional[str]]:
+def _fetch_candidates(destination: str, prefetched: Optional[dict] = None) -> Tuple[List[Candidate], Optional[str]]:
     """Real points of interest, converted to scheduler Candidates. Returns [] (not
     fake data) if destination_search is unavailable or the location can't be
     resolved."""
     try:
-        result = destination_search(destination)
+        # Reuse the parallel prefetch when the orchestrator supplied one. Falling back
+        # to a fresh lookup keeps this function usable standalone (and in tests).
+        result = prefetched if prefetched is not None else destination_search(destination)
         activities = result.get("activities", [])
         # Carry the provider through as the slot's source attribution -- the verifier
         # rejects any scheduled fact that cannot be traced back to a real tool call,
@@ -142,14 +144,14 @@ def _llm_narration(req: ItineraryRequest, result: ScheduleResult) -> Optional[Li
     return None
 
 
-def generate_itinerary(req: ItineraryRequest) -> ItineraryResponse:
+def generate_itinerary(req: ItineraryRequest, prefetched_pois: Optional[dict] = None) -> ItineraryResponse:
     """
     Generate a day-by-day itinerary. The deterministic scheduler always decides
     which real attraction goes in which slot (respecting travel time and budget);
     an LLM, if configured, only narrates prose for those already-decided slots and
     cannot alter the schedule.
     """
-    candidates, resolved = _fetch_candidates(req.destination)
+    candidates, resolved = _fetch_candidates(req.destination, prefetched_pois)
     result = _build_schedule_result(req, candidates)
 
     # If the geocoder resolved to a different place than was asked for, that belongs in

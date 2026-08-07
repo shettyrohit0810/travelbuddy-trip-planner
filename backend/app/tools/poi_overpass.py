@@ -237,39 +237,19 @@ def _query_overpass(query: str, location: str) -> Optional[dict]:
     return None
 
 
-@ttl_cache(seconds=86400)
-def overpass_poi_search(location: str) -> dict:
-    """Real POIs for a location. Returns an empty activity list -- never fabricated
-    data -- if geocoding fails, Overpass errors, or nothing usable comes back.
+def parse_elements(elements: list, limit: int) -> List[dict]:
+    """Turn raw Overpass elements into activity dicts.
 
-    Cached for 24h per location: Overpass is a shared community endpoint with real
-    rate limits, and repeated eval runs would otherwise hammer it.
+    Extracted so the acquisition agent's tools produce byte-identical output to the
+    default path -- if the agent's widened search returned differently-shaped data, the
+    scheduler would be consuming two different contracts depending on whether an agent
+    happened to run.
     """
-    # Escape hatch for CI and offline runs. Overpass is a free community service and
-    # hitting it on every push is both slow (60-100s per unseen city) and impolite.
-    # Set to any non-empty value to take the honest-degradation path instead.
-    if os.environ.get("TRAVELBUDDY_DISABLE_LIVE_POI"):
-        logger.info("TRAVELBUDDY_DISABLE_LIVE_POI set; skipping live Overpass lookup.")
-        return {"destination": location, "results_count": 0, "activities": [],
-                "source": "disabled", "resolved_location": None}
-
-    geo = _geocode(location)
-    if geo is None:
-        return {"destination": location, "results_count": 0, "activities": [],
-                "source": "overpass", "resolved_location": None}
-
-    lat, lon, resolved = geo
-    data = _query_overpass(_build_query(lat, lon), location)
-    if data is None:
-        # Covers HTTP 429 (rate limited) and 504 (query timeout), both of which Overpass
-        # returns under load. Degrade to no results rather than inventing places.
-        return {"destination": location, "results_count": 0, "activities": [], "source": "overpass", "resolved_location": resolved}
-
     estimator = StaticCostEstimator()
     activities: List[dict] = []
     seen_names = set()
 
-    for element in data.get("elements", []):
+    for element in elements:
         tags = element.get("tags") or {}
         # Prefer an English name when the mapper supplied one; fall back to the local
         # name rather than dropping the feature.
@@ -304,8 +284,38 @@ def overpass_poi_search(location: str) -> dict:
     # Temple" on an earlier run. A large pool lets the knapsack decide on cost and travel
     # time (which is the point of having a scheduler) instead of the alphabet deciding.
     activities.sort(key=lambda a: (-a["rating"], a["name"]))
-    activities = activities[:MAX_RESULTS]
+    return activities[:limit]
 
+
+@ttl_cache(seconds=86400)
+def overpass_poi_search(location: str) -> dict:
+    """Real POIs for a location. Returns an empty activity list -- never fabricated
+    data -- if geocoding fails, Overpass errors, or nothing usable comes back.
+
+    Cached for 24h per location: Overpass is a shared community endpoint with real
+    rate limits, and repeated eval runs would otherwise hammer it.
+    """
+    # Escape hatch for CI and offline runs. Overpass is a free community service and
+    # hitting it on every push is both slow (60-100s per unseen city) and impolite.
+    # Set to any non-empty value to take the honest-degradation path instead.
+    if os.environ.get("TRAVELBUDDY_DISABLE_LIVE_POI"):
+        logger.info("TRAVELBUDDY_DISABLE_LIVE_POI set; skipping live Overpass lookup.")
+        return {"destination": location, "results_count": 0, "activities": [],
+                "source": "disabled", "resolved_location": None}
+
+    geo = _geocode(location)
+    if geo is None:
+        return {"destination": location, "results_count": 0, "activities": [],
+                "source": "overpass", "resolved_location": None}
+
+    lat, lon, resolved = geo
+    data = _query_overpass(_build_query(lat, lon), location)
+    if data is None:
+        # Covers HTTP 429 (rate limited) and 504 (query timeout), both of which Overpass
+        # returns under load. Degrade to no results rather than inventing places.
+        return {"destination": location, "results_count": 0, "activities": [], "source": "overpass", "resolved_location": resolved}
+
+    activities = parse_elements(data.get("elements", []), MAX_RESULTS)
     if not activities:
         logger.warning(f"Overpass returned no usable POIs for {location!r}")
 

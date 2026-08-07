@@ -11,13 +11,14 @@ from app.schemas.itinerary import ItineraryRequest, ItineraryResponse
 def test_itinerary_node_passes_budget_and_accommodation_coords_through():
     captured = {}
 
-    def fake_generate_itinerary(req: ItineraryRequest) -> ItineraryResponse:
+    def fake_generate_itinerary(req: ItineraryRequest, prefetched_pois=None) -> ItineraryResponse:
         captured["req"] = req
         return ItineraryResponse(destination=req.destination, itinerary=[], warnings=[])
 
     state = {
         "logs": [],
         "retries": 0,
+        "poi_prefetch": None,
         "destination": "Testville",
         "requirements": TripRequirements(destination="Testville", days=3, people=2, interests=[]),
         "weather": WeatherIntelligence(temperature="25C", rain_probability="10%", suitability_score=80, warnings=[]),
@@ -36,13 +37,14 @@ def test_itinerary_node_passes_budget_and_accommodation_coords_through():
 def test_itinerary_node_handles_no_accommodation_gracefully():
     captured = {}
 
-    def fake_generate_itinerary(req: ItineraryRequest) -> ItineraryResponse:
+    def fake_generate_itinerary(req: ItineraryRequest, prefetched_pois=None) -> ItineraryResponse:
         captured["req"] = req
         return ItineraryResponse(destination=req.destination, itinerary=[], warnings=[])
 
     state = {
         "logs": [],
         "retries": 0,
+        "poi_prefetch": None,
         "destination": "Testville",
         "requirements": TripRequirements(destination="Testville", days=2, people=1, interests=[]),
         "weather": None,
@@ -56,3 +58,25 @@ def test_itinerary_node_handles_no_accommodation_gracefully():
     assert captured["req"].activities_budget is None
     assert captured["req"].accommodation_lat is None
     assert captured["req"].accommodation_lon is None
+
+
+def test_itinerary_node_forwards_the_parallel_poi_prefetch():
+    """The prefetch exists only to move the slow POI lookup off the critical path, so
+    the itinerary node must actually consume it rather than re-fetching."""
+    captured = {}
+
+    def fake_generate_itinerary(req: ItineraryRequest, prefetched_pois=None) -> ItineraryResponse:
+        captured["prefetched"] = prefetched_pois
+        return ItineraryResponse(destination=req.destination, itinerary=[], warnings=[])
+
+    prefetch = {"activities": [], "source": "overpass", "resolved_location": "Testville, Japan"}
+    state = {
+        "logs": [], "retries": 0, "destination": "Testville",
+        "requirements": TripRequirements(destination="Testville", days=2, people=1, interests=[]),
+        "weather": None, "budget": None, "accommodation": [],
+        "poi_prefetch": prefetch,
+    }
+    with patch("app.agents.orchestrator.generate_itinerary", side_effect=fake_generate_itinerary):
+        itinerary_node(state)
+
+    assert captured["prefetched"] is prefetch
