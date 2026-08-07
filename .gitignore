@@ -44,3 +44,4 @@ postgres_data/
 *.swp
 Thumbs.db
 .DS_Store
+.claude/
