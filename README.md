@@ -55,12 +55,16 @@ remaining headroom, stops, and returns `valid: false`.
 
 This is a work in progress, and a few claims are deliberately **not** made:
 
-- **Real-world data is opt-in and currently unverified.** Points of interest
-  (OpenTripMap) and hotels (Amadeus) require API keys. Without them the tools return
-  **empty results and explicit warnings — they never fabricate places.** The real-data
-  path has not yet been verified end-to-end against live APIs.
-- The repair loop's only lever is the activities allocation. A budget blown by
-  transport or lodging is *detected* but not *repaired*.
+- **POI grounding is real and needs no API key** — it uses OpenStreetMap via Overpass,
+  verified end-to-end (see the sample itinerary above). Hotels still require an Amadeus
+  key and remain unverified. Where a source is unavailable the tools return **empty
+  results and explicit warnings — they never fabricate places.**
+- **Geocoding is a weak link.** Open-Meteo has no entry for some well-known regions, so
+  a request can resolve to a different place of the same name. The itinerary now says
+  which place it actually planned rather than substituting silently.
+- The repair loop spends across activities, food and lodging, each floored. Transport
+  is deliberately not reducible, so a transport-dominated overrun is partially absorbed
+  and then reported unresolved rather than "fixed" by rewriting a real price.
 - A second "vlog intelligence" pipeline exists in the codebase but is a linear chain
   with a placeholder verification step; it is not part of the main planning graph.
 
@@ -857,21 +861,37 @@ Produced by `python -m evals.run_eval` (`backend/evals/`) over 10 benchmark case
 spanning ordinary, tight-but-repairable, genuinely infeasible, and adversarial inputs.
 Reproduce it yourself — these are the harness's actual output, not estimates.
 
-| Metric | Measured Value |
-|---|---|
-| Cases run / crashes | 10 / **0** |
-| Verifier agreed with expected outcome | **6/6** constrained cases (100%) |
-| Mean plan latency | **0.93 s** |
-| p95 plan latency | **1.61 s** |
-| Total repair iterations across all cases | 3 |
-| Backend tests | **76 passing** |
-| Stops scheduled | **0** — see caveat |
+| Metric | Cold POI cache | Warm POI cache |
+|---|---|---|
+| Cases run / crashes | 10 / **0** | 10 / **0** |
+| Verifier agreed with expected outcome | **6/6** | **6/6** |
+| Mean plan latency | 59.15 s | **0.00 s** |
+| p95 plan latency | 87.19 s | **0.01 s** |
+| Cases needing repair | 3/10 | 3/10 |
+| Mean repair iterations | 0.30 | 0.30 |
+| Cases with scheduled stops | 5/10 | 5/10 |
+| Stops scheduled / grounded in a real source | **33 / 33** | 33 / 33 |
+| Backend tests | **95 passing** | — |
 
-> **Caveat, stated plainly:** the run above had no `OPENTRIPMAP_API_KEY`, so no
-> point-of-interest source was reachable and **zero stops were scheduled**. The latency
-> figures therefore exclude live POI lookups, and the grounding rate is unmeasured. The
-> harness prints this warning itself rather than letting the numbers be misread. With a
-> key configured these need re-measuring.
+Reported as fractions rather than percentages on purpose: ten cases is far too small a
+sample for "100%" to mean what it looks like.
+
+**Latency is dominated by cold Overpass lookups** (60–100 s for a city not seen before);
+cached lookups are effectively free for 24h. Only the warm column describes steady
+state, and only the cold column describes a first-time visitor to a new city — neither
+alone is "the" latency.
+
+**Two things the numbers do not say.** Only 5/10 cases schedule stops, because some
+destinations genuinely have no Wikidata-linked POIs in OpenStreetMap — those cases
+correctly return empty with a warning rather than inventing places. And the ranking is
+weak: every linked POI scores 4.0–4.5 on the notability proxy, so ties break
+alphabetically and the [sample Kyoto itinerary](docs/samples/kyoto-3day-real-itinerary.md)
+is all early-alphabet temples while Kinkaku-ji sits unselected in the candidate pool.
+That is a real limitation, not a rounding detail.
+
+**Sample output:** [docs/samples/kyoto-3day-real-itinerary.md](docs/samples/kyoto-3day-real-itinerary.md)
+— a real 3-day Kyoto plan, every stop from live OpenStreetMap data with source
+attribution, generated with no LLM key configured.
 
 ---
 
