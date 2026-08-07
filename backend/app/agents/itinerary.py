@@ -21,7 +21,7 @@ from app.scheduling.costs import StaticCostEstimator
 logger = logging.getLogger("app.agents.itinerary")
 
 
-def _fetch_candidates(destination: str) -> List[Candidate]:
+def _fetch_candidates(destination: str) -> Tuple[List[Candidate], Optional[str]]:
     """Real points of interest, converted to scheduler Candidates. Returns [] (not
     fake data) if destination_search is unavailable or the location can't be
     resolved."""
@@ -32,9 +32,10 @@ def _fetch_candidates(destination: str) -> List[Candidate]:
         # rejects any scheduled fact that cannot be traced back to a real tool call,
         # so this must reflect where the data actually came from.
         source = result.get("source") or "unknown"
+        resolved = result.get("resolved_location")
     except Exception as e:
         logger.error(f"destination_search failed for {destination!r}: {e}")
-        return []
+        return [], None
 
     estimator = StaticCostEstimator()
     candidates = []
@@ -57,7 +58,7 @@ def _fetch_candidates(destination: str) -> List[Candidate]:
             source=source,
             estimated_cost=float(cost),
         ))
-    return candidates
+    return candidates, resolved
 
 
 def _minutes_to_hhmm(minutes: float) -> str:
@@ -148,8 +149,18 @@ def generate_itinerary(req: ItineraryRequest) -> ItineraryResponse:
     an LLM, if configured, only narrates prose for those already-decided slots and
     cannot alter the schedule.
     """
-    candidates = _fetch_candidates(req.destination)
+    candidates, resolved = _fetch_candidates(req.destination)
     result = _build_schedule_result(req, candidates)
+
+    # If the geocoder resolved to a different place than was asked for, that belongs in
+    # the output, not just a log line. Silently planning Genoa when the request said Goa
+    # produces a confident itinerary that answers the wrong question.
+    location_warnings = []
+    if resolved and req.destination.strip().lower() not in resolved.lower():
+        location_warnings.append(
+            f"Requested '{req.destination}' resolved to '{resolved}' — the stops below "
+            f"are in {resolved}."
+        )
 
     narrations_by_day = {}
     llm_narrations = _llm_narration(req, result)
@@ -188,5 +199,5 @@ def generate_itinerary(req: ItineraryRequest) -> ItineraryResponse:
     return ItineraryResponse(
         destination=req.destination,
         itinerary=daily_schedules,
-        warnings=result.warnings,
+        warnings=location_warnings + result.warnings,
     )

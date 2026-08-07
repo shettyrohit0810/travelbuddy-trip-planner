@@ -61,25 +61,36 @@ def _summarize(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     total_slots = sum(r["slots_scheduled"] for r in results)
     grounded = sum(r["slots_grounded"] for r in results)
 
+    needed_repair = [r for r in results if r["repair_attempts"] > 0]
+    repair_counts = [r["repair_attempts"] for r in results]
+    cases_with_slots = [r for r in results if r["slots_scheduled"] > 0]
+
     return {
         "cases": len(results),
         "crashes": sum(1 for r in results if r["error"]),
-        "constrained_cases": len(constrained),
-        "verifier_correct": len(correct),
-        "verifier_accuracy_pct": round(100 * len(correct) / len(constrained), 1) if constrained else None,
+        # Reported as a fraction, deliberately: n is far too small for a percentage
+        # to mean anything, and "100%" of six cases invites more confidence than
+        # six cases can support.
+        "verifier_correct": f"{len(correct)}/{len(constrained)}" if constrained else "0/0",
         "mean_latency_s": round(statistics.mean(latencies), 2) if latencies else None,
         "p95_latency_s": round(sorted(latencies)[max(int(0.95 * len(latencies)) - 1, 0)], 2) if latencies else None,
-        "total_repair_attempts": sum(r["repair_attempts"] for r in results),
+        "cases_needing_repair": f"{len(needed_repair)}/{len(results)}",
+        "mean_repair_iterations": round(statistics.mean(repair_counts), 2) if repair_counts else None,
+        "total_repair_attempts": sum(repair_counts),
+        "cases_with_scheduled_stops": f"{len(cases_with_slots)}/{len(results)}",
         "slots_scheduled": total_slots,
         "slots_grounded": grounded,
-        "grounding_pct": round(100 * grounded / total_slots, 1) if total_slots else None,
+        "grounding": f"{grounded}/{total_slots}" if total_slots else "0/0",
     }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--json", dest="json_path", default=None, help="write raw results to this path")
+    parser.add_argument("--label", default="run", help="label for this pass, e.g. cold/warm")
     args = parser.parse_args()
+
+    print(f"=== pass: {args.label} ===")
 
     results = [_run_case(c) for c in CASES]
 
@@ -110,10 +121,16 @@ def main() -> int:
 
     if summary["slots_scheduled"] == 0:
         print(
-            "\nNOTE: zero stops were scheduled across every case. That means no POI source "
-            "is configured (OPENTRIPMAP_API_KEY absent), so the grounding and scheduling "
-            "numbers above are NOT evidence the real-data path works -- only that the "
-            "pipeline degrades honestly without it."
+            "\nNOTE: zero stops were scheduled across every case, so the grounding and "
+            "scheduling numbers above are NOT evidence the real-data path works -- only "
+            "that the pipeline degrades honestly. Check the logs for Overpass timeouts "
+            "or geocoding failures before reading anything else into this run."
+        )
+    else:
+        print(
+            f"\nNOTE: latency here depends heavily on POI cache state. A cold Overpass "
+            f"lookup measured 60-100s per unseen city; cached lookups are effectively "
+            f"free. Compare cold and warm passes before quoting a latency figure."
         )
 
     if args.json_path:

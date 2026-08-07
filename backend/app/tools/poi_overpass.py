@@ -121,10 +121,20 @@ def _coords_of(element: Dict[str, Any]) -> Optional[Tuple[float, float]]:
 
 
 @ttl_cache(seconds=86400)
-def _geocode(location: str) -> Optional[Tuple[float, float]]:
-    """City -> coordinates via Open-Meteo's geocoding API (also keyless)."""
+def _geocode(location: str) -> Optional[Tuple[float, float, str]]:
+    """Location -> (lat, lon, "Resolved Name, Country") via Open-Meteo (also keyless).
+
+    Prefers an EXACT case-insensitive name match over the API's default ranking, which
+    orders by population and produces silent, badly wrong substitutions: asking for
+    "Goa" returns **Genoa, Italy** (pop 580k) as the top hit, so an entire itinerary
+    would be built from Italian churches while the plan claimed to be about Goa. An
+    exact match is not always the *intended* place either -- Open-Meteo's dataset has no
+    entry for the Indian state of Goa at all -- which is exactly why the resolved name
+    is returned to the caller rather than swallowed. Better to say which "Goa" was
+    planned than to quietly pick one.
+    """
     try:
-        data = get_json(GEOCODE_URL, {"name": location, "count": 1})
+        data = get_json(GEOCODE_URL, {"name": location, "count": 20})
     except Exception as e:
         logger.error(f"Geocoding failed for {location!r}: {e}")
         return None
@@ -132,7 +142,19 @@ def _geocode(location: str) -> Optional[Tuple[float, float]]:
     if not results:
         logger.warning(f"Geocoding found no match for location: {location!r}")
         return None
-    return results[0]["latitude"], results[0]["longitude"]
+
+    wanted = location.strip().lower()
+    exact = [r for r in results if (r.get("name") or "").strip().lower() == wanted]
+    # Among exact matches prefer the most populous; fall back to the API's own ranking.
+    chosen = max(exact, key=lambda r: r.get("population") or 0) if exact else results[0]
+
+    resolved = ", ".join(filter(None, [chosen.get("name"), chosen.get("country")]))
+    if not exact:
+        logger.warning(
+            f"Geocoding found no exact match for {location!r}; using nearest match "
+            f"{resolved!r}. The itinerary will describe that place, not {location!r}."
+        )
+    return chosen["latitude"], chosen["longitude"], resolved
 
 
 def _build_query(lat: float, lon: float) -> str:
@@ -222,16 +244,17 @@ def overpass_poi_search(location: str) -> dict:
     Cached for 24h per location: Overpass is a shared community endpoint with real
     rate limits, and repeated eval runs would otherwise hammer it.
     """
-    coords = _geocode(location)
-    if coords is None:
-        return {"destination": location, "results_count": 0, "activities": [], "source": "overpass"}
+    geo = _geocode(location)
+    if geo is None:
+        return {"destination": location, "results_count": 0, "activities": [],
+                "source": "overpass", "resolved_location": None}
 
-    lat, lon = coords
+    lat, lon, resolved = geo
     data = _query_overpass(_build_query(lat, lon), location)
     if data is None:
         # Covers HTTP 429 (rate limited) and 504 (query timeout), both of which Overpass
         # returns under load. Degrade to no results rather than inventing places.
-        return {"destination": location, "results_count": 0, "activities": [], "source": "overpass"}
+        return {"destination": location, "results_count": 0, "activities": [], "source": "overpass", "resolved_location": resolved}
 
     estimator = StaticCostEstimator()
     activities: List[dict] = []
@@ -279,6 +302,9 @@ def overpass_poi_search(location: str) -> dict:
 
     return {
         "destination": location,
+        # What was ACTUALLY planned. Surfaced so a mismatch between the request and the
+        # resolved place is visible instead of silently baked into the itinerary.
+        "resolved_location": resolved,
         "results_count": len(activities),
         "activities": activities,
         "source": "overpass",

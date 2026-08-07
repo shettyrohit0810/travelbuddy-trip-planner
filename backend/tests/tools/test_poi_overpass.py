@@ -62,7 +62,7 @@ MOCK_OVERPASS = {
 
 
 @patch("app.tools.poi_overpass._query_overpass", return_value=MOCK_OVERPASS)
-@patch("app.tools.poi_overpass._geocode", return_value=(35.0, 135.0))
+@patch("app.tools.poi_overpass._geocode", return_value=(35.0, 135.0, "Testville, Japan"))
 def test_overpass_search_dedupes_and_skips_unusable_entries(mock_geo, mock_post):
     overpass_poi_search.cache_clear()
     result = overpass_poi_search("Testville")
@@ -91,8 +91,38 @@ def test_overpass_search_returns_empty_when_geocoding_fails(mock_geo):
 
 
 @patch("app.tools.poi_overpass._query_overpass", return_value=None)
-@patch("app.tools.poi_overpass._geocode", return_value=(35.0, 135.0))
+@patch("app.tools.poi_overpass._geocode", return_value=(35.0, 135.0, "Testville, Japan"))
 def test_overpass_search_degrades_on_rate_limit_rather_than_fabricating(mock_geo, mock_post):
     overpass_poi_search.cache_clear()
     result = overpass_poi_search("Testville")
     assert result["activities"] == []
+
+
+# --- geocoding: the silent-wrong-city bug ------------------------------------
+
+GEO_GOA = {"results": [
+    {"name": "Genoa", "country": "Italy", "latitude": 44.4, "longitude": 8.9, "population": 580097},
+    {"name": "Goa", "country": "Philippines", "latitude": 13.7, "longitude": 123.5, "population": 20936},
+    {"name": "Goa", "country": "India", "latitude": 24.6, "longitude": 72.7, "population": None},
+]}
+
+
+@patch("app.tools.poi_overpass.get_json", return_value=GEO_GOA)
+def test_geocode_prefers_exact_name_over_a_more_populous_fuzzy_match(mock_get):
+    """Regression: Open-Meteo ranks by population, so "Goa" returned Genoa, Italy and an
+    entire itinerary was built from Italian churches while claiming to be about Goa."""
+    from app.tools.poi_overpass import _geocode
+    _geocode.cache_clear()
+    lat, lon, resolved = _geocode("Goa")
+    assert "Genoa" not in resolved
+    assert resolved.startswith("Goa")
+    assert (lat, lon) != (44.4, 8.9)
+
+
+@patch("app.tools.poi_overpass.get_json", return_value=GEO_GOA)
+def test_geocode_reports_which_place_it_actually_resolved_to(mock_get):
+    from app.tools.poi_overpass import _geocode
+    _geocode.cache_clear()
+    _, _, resolved = _geocode("Goa")
+    # The caller must be able to tell the user WHICH Goa was planned.
+    assert "," in resolved and resolved.split(",")[1].strip()
