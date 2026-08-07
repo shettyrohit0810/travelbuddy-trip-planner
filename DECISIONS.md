@@ -3,6 +3,102 @@
 Running log of what was built, what was found, and what was explicitly cut, one entry
 per phase of [KICKOFF_PROMPT.md](KICKOFF_PROMPT.md).
 
+## Part 1-3 — Real POI grounding, widened repair, and re-measurement
+
+### Part 1 — POI grounding via OpenStreetMap Overpass (no API key)
+
+Overpass was chosen over OpenTripMap/Geoapify because it needs **no account**, so a
+fresh clone produces grounded itineraries out of the box. Obtaining an OpenTripMap key
+would have required creating an account, which is the user's to do.
+
+Four query iterations were needed, each failure found by running it, not by reading docs:
+1. A single `out center N` cap truncated the union arbitrarily (Overpass emits nodes
+   before ways), so **every Kyoto landmark lost to obscure municipal museums** —
+   Kinkaku-ji, Fushimi Inari and Kiyomizu-dera are all ways.
+2. `nwr` dragged relations into an already-expensive tag scan → server-side timeout.
+3. An unfiltered `historic` sweep → server-side timeout. Overpass reports both as
+   **HTTP 200 with a `remark` field**, not an error status, so "my query was too
+   expensive" is indistinguishable from "this city has no attractions" unless you look.
+4. A key-only `["tourism"]` filter matched `tourism=hotel`, putting **ANA Crowne Plaza
+   and Mitsui Garden Hotel into a sightseeing list**.
+
+Requiring a `wikidata` link fixed quality and cost simultaneously. Endpoints are tried
+with a mirror plus a second round after backoff — the same query was observed returning
+300 elements, a timeout remark, a 504, and 300 elements again with no change.
+
+**Cost policy (explicitly decided, per the brief):** OSM's `fee` tag is *usually absent*,
+so missing-cost is the common case, not an edge case. Absence maps to the category rate,
+never to 0.0 — treating it as free is precisely the bug class the Hypothesis property
+test already caught in the knapsack. Only explicit `fee=no` yields 0.0. The `charge` tag
+is **ignored even when present**: its values carry mixed currencies ("500 JPY", "£3.50")
+and converting them needs an FX source this project does not have; silently mixing
+currencies into one budget total would be a correctness bug the verifier cannot catch.
+
+### Part 2 — Widened repair levers
+
+Repair now spends across `activities → food → lodging` in that order, each bounded by a
+floor anchored to the original allocation. **Transport is deliberately not reducible:**
+the transport agent picks a concrete mode at a concrete price, so writing that number
+down would balance the budget by lying about it. A transport-dominated overrun is
+partially absorbed and then honestly reported as unresolved.
+
+Bug introduced and fixed during this work: floors computed as a fraction of the
+*current* value let each pass shave another fraction, so a lever approached zero
+without ever reaching a floor and `exhausted` never fired (Zeno-style non-termination,
+bounded in practice only by the attempt cap). Floors are now anchored to a baseline
+captured on the first repair pass, with a regression test.
+
+### The most serious finding: the geocoder was planning the wrong city
+
+An eval case scheduled stops it should not have. Tracing it showed Open-Meteo's
+geocoding ranks by population, so **"Goa" resolved to Genoa, Italy** (pop 580k). Every
+Goa case in the benchmark was building an itinerary from Italian churches — *Abbazia di
+San Siro*, *Aquarium of Genoa* — while the plan claimed to be about Goa.
+
+Exact-name matching is now preferred over population ranking. That is **not sufficient
+on its own**: Open-Meteo has no entry for the Indian state of Goa at all, so an exact
+match still lands on Goa, Philippines. Hence the resolved place is returned to the caller
+and surfaced as an itinerary warning whenever it differs from the request. Naming which
+place was planned is the only honest option when the geocoder cannot find the intended one.
+
+### Part 3 — Re-measured with real data
+
+| Metric | Cold cache | Warm cache |
+|---|---|---|
+| Cases run / crashes | 10 / **0** | 10 / **0** |
+| Verifier agreed with expectation | **6/6** | **6/6** |
+| Mean latency | **59.15 s** | **0.00 s** |
+| p95 latency | **87.19 s** | **0.01 s** |
+| Cases needing repair | 3/10 | 3/10 |
+| Mean repair iterations | 0.30 | 0.30 |
+| Cases with scheduled stops | 5/10 | 5/10 |
+| Stops scheduled / grounded | **33 / 33** | 33 / 33 |
+
+Latency is dominated entirely by cold Overpass lookups (60–100 s per unseen city);
+cached lookups are effectively free. Only the warm figure describes steady state, and
+only the cold figure describes a first-time visitor to a new city. Neither alone is
+"the" latency.
+
+**Cases that regressed versus the pre-fix run, and why — this matters more than the
+totals.** The earlier run reported 138 stops across 8/10 cases. The corrected run
+reports 33 across 5/10. That is not a regression in capability; the earlier number was
+**inflated by planning the wrong city**. Goa now correctly resolves to Goa, Philippines,
+a small town with zero Wikidata-linked POIs, so the Goa cases legitimately schedule
+nothing instead of scheduling Genoa's landmarks under a Goa label. `gibberish_destination`
+also correctly dropped from 6 stops to 0. **Fewer stops, all of them real.**
+
+### Known quality limitation, not yet fixed
+
+Every Wikidata-linked POI scores 4.0–4.5 on the notability proxy, so the knapsack's ties
+break lexicographically. The sample Kyoto itinerary is consequently all alphabetically
+early temples — *Awata-jinjya, Anyo Temple, Bishamondō, Chion-in* — while Kinkaku-ji and
+Kiyomizu-dera sit in the candidate pool unselected. The scheduler is doing exactly what
+it was told; the input signal is too coarse to rank landmarks against each other. Fixing
+it properly needs a real popularity signal (Wikidata sitelink counts, or a provider that
+ships importance scores). **Do not describe the current output as well-ranked.**
+
+Sample real itinerary: [docs/samples/kyoto-3day-real-itinerary.md](docs/samples/kyoto-3day-real-itinerary.md)
+
 ## Phase 8 — Eval harness
 
 `backend/evals/` (`cases.py`, `run_eval.py`). Ten benchmark cases across four
