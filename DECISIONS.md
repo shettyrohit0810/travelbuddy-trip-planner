@@ -3,6 +3,83 @@
 Running log of what was built, what was found, and what was explicitly cut, one entry
 per phase of [KICKOFF_PROMPT.md](KICKOFF_PROMPT.md).
 
+## Phase 8 — Eval harness
+
+`backend/evals/` (`cases.py`, `run_eval.py`). Ten benchmark cases across four
+categories — ordinary, tight-but-repairable, genuinely infeasible, and
+edge/adversarial (gibberish destination, no destination stated, 30-day upper bound).
+The infeasible cases matter most: a harness that only measures happy paths cannot tell
+you whether the verifier catches anything.
+
+Measured (`python -m evals.run_eval`, no API keys configured):
+
+| Metric | Result |
+|---|---|
+| Cases run / crashes | 10 / **0** |
+| Constrained cases (budget stated) | 6 |
+| Verifier agreed with expected outcome | **6/6 (100%)** |
+| Mean latency | 0.93 s |
+| p95 latency | 1.61 s |
+| Total repair iterations across all cases | 3 |
+| Stops scheduled | **0** |
+
+**The harness prints an explicit warning when zero stops are scheduled**, because that
+is exactly the situation where the numbers could be misread as success: with no
+`OPENTRIPMAP_API_KEY` there is no POI source, so the scheduling and grounding columns
+prove only that the pipeline degrades honestly — not that the real-data path works.
+That caveat is emitted by the tool itself rather than left to a reader to remember.
+
+Exit code is non-zero on any crash or verifier/expectation mismatch, so this is usable
+as a CI gate later.
+
+## Phase 7 — Frontend truth
+
+Removed UI that displayed invented numbers. `BudgetDashboard` was the worst case: it
+never received the backend's real `BudgetBreakdown` at all — it hardcoded a `baseBudget`
+(125000 for Japan, else 25000), hardcoded every line item, and rendered a fixed
+**"Confidence Score: 94%"** (the same dishonesty pattern as the old fake
+`verification_node` that always reported 95%). The real `budget_summary` was already
+present in `TripPlanResults` and simply never passed down.
+
+- `BudgetDashboard` rewritten to render only real figures from `plan.budget_summary`,
+  with an honest empty state when no budget exists. The per-day timeline is an even
+  split of the real total, **labelled as exactly that** — the planner produces no
+  per-day spend, so anything finer would be invented.
+- **Deleted `BudgetSimulator.tsx`**: its "Live Trip Expense Tracker"
+  (fixed 35,000/21,300/13,700), "AI Festival Price Forecast" (fixed +35/+42/+15%), and
+  "Can I Afford This?" trade-off list were static JSX that never changed with input,
+  presented as AI analysis.
+- **Deleted `WeatherRadarMap.tsx`**: decorative SVG with no weather data behind it,
+  labelled as a radar map.
+
+Verified: `tsc --noEmit` clean, `next build` succeeds (11/11 pages).
+
+## Phase 5 — Alembic owns the schema
+
+Alembic was installed but had **never** produced a working migration. Three independent
+causes, each of which alone would have been enough:
+
+1. `alembic/script.py.mako` was missing entirely, so `alembic revision` crashed before
+   writing anything.
+2. `env.py` set `target_metadata = Base.metadata` but never imported the model modules.
+   `Base.metadata` is only populated as a side effect of importing the mapped classes,
+   so autogenerate compared the DB against **empty** metadata and silently emitted a
+   migration whose `upgrade()` body was `pass`. This is the quiet one — it produces a
+   real-looking migration file that does nothing.
+3. `app/main.py` called `Base.metadata.create_all()` at import time, so the app raced
+   ahead and built the tables itself. `alembic upgrade head` then failed with
+   "relation users already exists", and any future column-altering migration would
+   silently never run against a database the app had already shaped.
+
+Fixed all three: added the template, imported the models in `env.py`, deleted
+`create_all()`, and made the compose command run `alembic upgrade head` before uvicorn.
+The schema now has exactly one owner, and it is the one with a version history.
+
+Verified from a completely empty volume: the migration applies on cold start, `/health`
+reports the database connected, all three tables are created by the migration alone, a
+fresh autogenerate detects **zero drift** against the models, register/login/list-trips
+work, and 76/76 tests pass.
+
 ## Phase 4 — Real verifier + bounded replan loop
 
 **Built:**
