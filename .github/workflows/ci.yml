@@ -41,6 +41,12 @@ jobs:
       # No LLM or travel-API keys in CI. That is deliberate: the pipeline must be
       # able to prove it degrades honestly (empty results + warnings) rather than
       # fabricating data, and that path is exactly what runs without keys.
+      #
+      # Live POI lookups are disabled on push/PR: Overpass is a free community service
+      # and a cold lookup costs 60-100s per unseen city, which made this job take ~9
+      # minutes and put avoidable load on a shared endpoint every commit. The
+      # workflow_dispatch and weekly schedule runs exercise the real network path.
+      TRAVELBUDDY_DISABLE_LIVE_POI: ${{ (github.event_name == 'push' || github.event_name == 'pull_request') && '1' || '' }}
 
     defaults:
       run:
