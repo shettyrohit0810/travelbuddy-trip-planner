@@ -4,7 +4,7 @@
 
 # ✈️ TravelBuddy — AI Multi-Agent Travel Planner
 
-### *Plan smarter. Travel better. Powered by 16 specialized AI agents across a dual-graph pipeline.*
+### *A deterministic scheduler with a bounded verify-and-repair loop, orchestrated in LangGraph.*
 
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?style=flat-square&logo=fastapi)](https://fastapi.tiangolo.com)
 [![Next.js](https://img.shields.io/badge/Next.js-15-black?style=flat-square&logo=next.js)](https://nextjs.org)
@@ -14,7 +14,7 @@
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docker.com)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 
-[**Live Demo**](https://aeroguide.vercel.app) · [**API Docs**](https://aeroguide.vercel.app/api/docs) · [**Report Bug**](https://github.com/Akash7367/Trip_planer_Ai/issues)
+[**Architecture**](#-what-is-travelbuddy) · [**Decisions log**](DECISIONS.md) · [**Run it locally**](#-quick-start)
 
 </div>
 
@@ -22,9 +22,44 @@
 
 ## 📌 What is TravelBuddy?
 
-TravelBuddy is a **next-generation AI travel planning platform** that orchestrates **16 specialized AI agents** across two LangGraph pipelines to generate personalized, constraint-aware trip plans grounded in real-world data.
+TravelBuddy plans trips with a **LangGraph agent pipeline whose itinerary is decided by a deterministic scheduler, not by an LLM**. The LLM narrates prose over stops that are already fixed; it cannot reorder, invent, drop, or rename one.
 
-Unlike single-LLM chatbots (ChatGPT, Gemini), TravelBuddy uses a **multi-agent architecture** where each agent acts as a domain expert — handling destinations, weather, hotels, transportation, budgets, and itinerary generation. The system coordinates these agents in parallel and synthesizes their results into one cohesive, actionable plan.
+The part worth looking at is the **bounded verify-and-repair cycle**:
+
+```
+understanding → destination → weather → transport → accommodation → budget
+                                             ↓
+                    itinerary → verify → (repair → itinerary)* → planner
+```
+
+`verify` checks the assembled plan against **hard constraints using arithmetic, not an
+LLM self-review** — budget ceiling, trip length, slot overlap, and whether every
+scheduled fact carries a source attribution. A violation is therefore a fact the graph
+routes on. `repair` makes a targeted deterministic change (reduce the activities
+allocation by exactly the overspend, recompute the total) and the scheduler re-solves.
+The loop terminates on success, an unrepairable violation, an attempt cap, or exhausted
+headroom — and reports unresolved violations honestly rather than swallowing them.
+
+**Worked example** (`budget 16000`, measured): first pass overruns by 1512 → repair
+tightens activities 3200 → 1688 → scheduler re-solves → second verification passes,
+final total exactly 16000. Given an impossible budget (5000) it repairs once, detects no
+remaining headroom, stops, and returns `valid: false`.
+
+### ⚠️ Honest status
+
+This is a work in progress, and a few claims are deliberately **not** made:
+
+- **Real-world data is opt-in and currently unverified.** Points of interest
+  (OpenTripMap) and hotels (Amadeus) require API keys. Without them the tools return
+  **empty results and explicit warnings — they never fabricate places.** The real-data
+  path has not yet been verified end-to-end against live APIs.
+- The repair loop's only lever is the activities allocation. A budget blown by
+  transport or lodging is *detected* but not *repaired*.
+- A second "vlog intelligence" pipeline exists in the codebase but is a linear chain
+  with a placeholder verification step; it is not part of the main planning graph.
+
+See [DECISIONS.md](DECISIONS.md) for the full per-phase engineering log, including bugs
+found and scope explicitly cut.
 
 ### 🎯 The Core Problem We Solve
 
@@ -34,8 +69,8 @@ Unlike single-LLM chatbots (ChatGPT, Gemini), TravelBuddy uses a **multi-agent a
 
 | Problem | TravelBuddy Solution |
 |---|---|
-| **Generic AI recommendations** | 16 specialized agents, each domain-expert prompted |
-| **Stale training data** | **Vlog Intelligence Pipeline** — real YouTube travel vlog transcript extraction |
+| **LLMs inventing plausible-but-fake places** | Every scheduled stop carries a `source`; unattributed facts fail verification |
+| **LLMs ignoring a budget** | Budget is enforced by a knapsack solver and re-checked arithmetically, never trusted to the model |
 | **Fragmented planning tools** | Single unified platform — plan to PDF in one flow |
 | **Static plans** | **Selective Replanning** — change one day or one hotel without rebuilding the rest |
 | **No personalization** | **Persistent Memory System** — learns and remembers your travel preferences |
