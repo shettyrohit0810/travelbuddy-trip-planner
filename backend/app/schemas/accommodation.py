@@ -11,6 +11,8 @@ class AccommodationOption(BaseModel):
     hotel: str = Field(..., description="Name of the accommodation")
     price: float = Field(..., description="Price per night")
     rating: float = Field(..., description="Guest rating out of 5")
+    lat: Optional[float] = Field(default=None, description="Latitude, when known from a real API")
+    lon: Optional[float] = Field(default=None, description="Longitude, when known from a real API")
 
 class AccommodationResponse(BaseModel):
     accommodations: List[AccommodationOption]
