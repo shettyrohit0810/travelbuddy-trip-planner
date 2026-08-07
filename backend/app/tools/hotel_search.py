@@ -97,6 +97,8 @@ def hotel_search(location: str, check_in: str, check_out: str, budget: float | N
             # 0.0 (rather than None) so downstream min_rating filtering doesn't crash.
             "rating": hotel_info.get("rating") or 0.0,
             "amenities": hotel_info.get("amenities", []),
+            "lat": hotel_info.get("latitude"),
+            "lon": hotel_info.get("longitude"),
         })
 
     return {

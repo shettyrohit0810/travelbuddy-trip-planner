@@ -301,12 +301,30 @@ def itinerary_node(state: OrchestratorState) -> dict:
     weather_score = None
     if state["weather"]:
         weather_score = state["weather"].suitability_score
-        
+
+    # The budget node runs before this one in the graph, so its activities
+    # allocation is the hard ceiling the scheduler enforces per trip.
+    activities_budget = None
+    if state["budget"]:
+        activities_budget = state["budget"].activities_cost
+
+    # Days start from the hotel, so the top accommodation pick's real coordinates
+    # (when a live API supplied them) anchor the travel-time math.
+    accommodation_lat = None
+    accommodation_lon = None
+    if state["accommodation"]:
+        top_pick = state["accommodation"][0]
+        accommodation_lat = top_pick.lat
+        accommodation_lon = top_pick.lon
+
     itinerary_req = ItineraryRequest(
         destination=destination,
         days=days,
         interests=interests,
-        weather_score=weather_score
+        weather_score=weather_score,
+        activities_budget=activities_budget,
+        accommodation_lat=accommodation_lat,
+        accommodation_lon=accommodation_lon,
     )
     
     itinerary_response = run_node_with_retry(

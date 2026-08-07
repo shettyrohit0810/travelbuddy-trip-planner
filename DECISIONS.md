@@ -3,6 +3,92 @@
 Running log of what was built, what was found, and what was explicitly cut, one entry
 per phase of [KICKOFF_PROMPT.md](KICKOFF_PROMPT.md).
 
+## Phase 3 — Deterministic scheduling core
+
+Built on branch `worktree-deterministic-scheduling-core`. Tasks 1–5 (pytest/hypothesis
+bootstrap, domain models, travel-time port + haversine adapter, cost estimator, per-day
+knapsack selection and brute-force ordering) were completed in an earlier session; this
+entry covers Tasks 6–14.
+
+**Built:**
+- `scheduling/scheduler.py` — `build_schedule()` cross-day orchestration: owns the
+  used-candidate set, depletes the activities budget across days, and applies a
+  repeat-fallback (revisit the best candidate rather than leave a day blank) with an
+  explicit warning when it fires.
+- `scheduling/validator.py` — `validate()` independently re-checks a `ScheduleResult`
+  against its `ScheduleConstraints` (day-window bounds, slot overlap, budget ceiling).
+  Deliberately separate from `build_schedule` so it's a real trust-but-verify check
+  rather than the same logic asserting about itself. This is also the reusable seed for
+  Phase 4's plan verifier.
+- `tests/scheduling/test_properties.py` — hypothesis property tests asserting the
+  scheduler's output *always* satisfies `validate()`, and that it's deterministic
+  run-to-run.
+- Real coordinates end-to-end: `destination_search` now keeps OpenTripMap's
+  `point{lat,lon}` (previously discarded), and `hotel_search` keeps Amadeus's
+  `hotel.latitude/longitude`, carried through `AccommodationOption` into the agent.
+  Places missing a name or coordinates are skipped rather than defaulting to a
+  fabricated `(0,0)` — a Gulf-of-Guinea point would silently corrupt travel-time math.
+- `schemas/itinerary.py` widened: request now carries `activities_budget` +
+  `accommodation_lat/lon`; output carries structured `slots` (each with its `source`
+  API, so any scheduled fact is traceable) and `warnings`; plus a narration-only
+  schema for the LLM.
+- `agents/itinerary.py` rewritten — **the scheduler is now the mandatory backbone.**
+  `DESTINATION_DATABASE`, `rule_based_generate()`, and the old "3-per-day modulo"
+  indexing are deleted outright; no code path remains that invents itinerary structure.
+  The LLM, when a key is configured, only narrates prose over slots the scheduler
+  already fixed — it cannot reorder, invent, drop, or rename a stop. With no key,
+  deterministic templated narration is built straight from the schedule.
+- `orchestrator.py`'s `itinerary_node` now passes the budget node's `activities_cost`
+  as the scheduler's hard per-trip ceiling, and the top accommodation pick's real
+  coordinates as the day's start location.
+
+**Real bug found and fixed (worth remembering):** the Task 8 property test immediately
+found a genuine unsoundness in the Task 5 knapsack. It reasons in integer cents but the
+caller charges the true float cost, and it used `round()` — so a sub-cent cost
+(`0.0039`) quantized to **0 cents**, looked free, got selected against a `0.0` budget,
+and was then charged its real cost to the trip total, breaking the hard budget
+guarantee. Fixed by making quantization conservative in both directions (budget rounds
+DOWN, each cost rounds UP), so a selected set's true total can never exceed the real
+budget. Pinned with a deterministic regression test and re-verified with a standalone
+5000-example hypothesis run. This is exactly the class of bug the "budget is a hard,
+programmatically-enforced constraint" requirement exists to prevent.
+
+**Plan deviation (flagged, not silent):** the plan's Task 12 budget test asserted that a
+`0.0` activities budget schedules nothing. That premise is wrong —
+`ACTIVITY_COST_BY_CATEGORY` prices `"natural"` at `0.0`, so genuinely-free attractions
+legitimately still fit a zero budget. Rather than weaken the test to pass, it was
+replaced with the invariant that actually holds (zero budget ⇒ zero spend and no paid
+stop scheduled) plus a second case exercising a non-trivial budget ceiling.
+
+**Verified live** (Docker Compose, `db` + `backend`, local uncommitted override only —
+`docker-compose.yml` itself untouched; needed because host port 5433 is occupied by
+another project on this machine, plus the two pre-existing compose bugs logged under
+Phase 0 still bite):
+- `GET /health` → `{"status":"healthy","database":"connected"}`.
+- `POST /api/v1/itinerary/generate` for **Kyoto** returned `slots: []` with explicit
+  per-day warnings (`"no verified points of interest available to schedule"`). Kyoto is
+  the sharpest possible test case here: the pre-Phase-1 code returned *hardcoded Kyoto
+  attractions*, so the old system would have produced fake-but-entirely-plausible
+  temples. The new pipeline correctly admits it has no verified data instead.
+- `POST /api/v1/orchestrator/plan` (authenticated, full graph) ran every node to
+  completion and returned `day_wise_itinerary` in the new schema, carrying `slots` and
+  `warnings`, with `budget_summary.activities_cost` computed upstream — confirming the
+  scheduler is genuinely wired into the graph, not just unit-tested in isolation.
+- 50/50 backend tests pass.
+
+**Blocked — cannot be closed by me:** the real-data path (real POIs → real scheduled
+slots with real travel times) is still **not live-verified**, because there is no
+`backend/.env` on this machine and therefore no `OPENTRIPMAP_API_KEY` (nor
+`AMADEUS_API_KEY`/`AMADEUS_API_SECRET` for hotel coordinates). Obtaining those requires
+creating accounts, which is the user's to do. Everything above verifies the
+honest-degradation path and the logic under mocked real-shaped data; the moment a key
+is present, `POST /api/v1/itinerary/generate` should be re-run for a real city and the
+scheduled slot names checked against the live OpenTripMap response before Phase 3 is
+called fully done.
+
+**Still open from this phase:** Task 14's live real-data check (above), and the branch
+is not yet merged to `main`.
+
 ## Phase 1 — Decide the MCP layer's fate, ground the tools
 
 **Found before deciding:** the `mcp_server/` "MCP protocol" scaffolding (`server.py`'s

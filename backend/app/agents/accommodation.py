@@ -92,7 +92,9 @@ def rule_based_recommend(req: AccommodationRequest) -> List[AccommodationOption]
             "option": AccommodationOption(
                 hotel=name,
                 price=price,
-                rating=rating
+                rating=rating,
+                lat=h.get("lat"),
+                lon=h.get("lon"),
             ),
             "match_count": match_count
         })
