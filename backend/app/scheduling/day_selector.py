@@ -1,3 +1,4 @@
+import math
 from itertools import permutations
 from typing import List, Optional, Tuple
 
@@ -24,8 +25,14 @@ def _knapsack_select(candidates: List[Candidate], budget: float, max_items: int)
     if not candidates or max_items <= 0:
         return []
 
-    budget_cents = 10**9 if budget == float("inf") else max(int(round(budget * 100)), 0)
-    costs_cents = [max(int(round(c.estimated_cost * 100)), 0) for c in candidates]
+    # Quantization must be *conservative in both directions*, or budget enforcement
+    # is unsound: the knapsack reasons in integer cents but the caller charges the
+    # true float cost. Round the budget DOWN and each cost UP so the selected set's
+    # true total can never exceed the real budget. (Found by the property test: a
+    # 0.0039 cost round()ed to 0 cents looked free, got selected against a 0.0
+    # budget, then charged its true cost to the trip total.)
+    budget_cents = 10**9 if budget == float("inf") else max(math.floor(budget * 100), 0)
+    costs_cents = [max(math.ceil(c.estimated_cost * 100), 0) for c in candidates]
 
     # states: (count_used, cost_used_cents) -> (total_rating, indices_tuple)
     states = {(0, 0): (0.0, ())}

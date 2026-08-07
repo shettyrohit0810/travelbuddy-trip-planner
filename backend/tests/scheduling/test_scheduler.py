@@ -47,6 +47,19 @@ def test_build_schedule_total_cost_matches_sum_of_slot_costs():
     assert result.total_estimated_cost == slot_cost_sum
 
 
+def test_build_schedule_never_spends_more_than_a_sub_cent_budget():
+    """Regression (found by hypothesis): costs are quantized to integer cents for
+    the knapsack but charged at full float precision. A sub-cent cost must not be
+    treated as free against a zero budget."""
+    tiny = Candidate(
+        name="Tiny", category="historic", rating=1.0,
+        coords=Coordinates(0.0, 0.0), source="test", estimated_cost=0.00390625,
+    )
+    constraints = ScheduleConstraints(days=1, activities_budget=0.0)
+    result = build_schedule([tiny], constraints, PROVIDER)
+    assert result.total_estimated_cost <= 0.0
+
+
 def test_build_schedule_depletes_budget_across_days():
     constraints = ScheduleConstraints(days=2, max_slots_per_day=1, activities_budget=10.0)
     result = build_schedule([ALPHA, BETA], constraints, PROVIDER)
